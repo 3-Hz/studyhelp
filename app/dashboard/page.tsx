@@ -1,0 +1,145 @@
+import { asc } from "drizzle-orm";
+import Link from "next/link";
+import { db, schema } from "@/lib/db";
+import type { Rating } from "@/lib/db/schema";
+
+export const dynamic = "force-dynamic";
+
+const CELL_STYLE: Record<Rating, string> = {
+  green: "bg-emerald-500",
+  yellow: "bg-amber-400",
+  red: "bg-red-500",
+  // Dark green = suspended: do not quiz again unless reactivated.
+  suspended: "bg-emerald-900",
+};
+
+const CELL_LABEL: Record<Rating, string> = {
+  green: "Independent, complete recall",
+  yellow: "Partial, or needed hints",
+  red: "Not recalled, or a misconception",
+  suspended: "Suspended",
+};
+
+export default async function DashboardPage() {
+  const objectives = await db.query.learningObjectives.findMany({
+    orderBy: [
+      asc(schema.learningObjectives.lectureId),
+      asc(schema.learningObjectives.orderIndex),
+    ],
+  });
+
+  const dates = await db.query.studyDates.findMany({
+    orderBy: [asc(schema.studyDates.date)],
+  });
+
+  const performances = await db.query.performances.findMany();
+  const lectures = await db.query.lectures.findMany();
+
+  const lectureTitleById = new Map(lectures.map((l) => [l.id, l.title]));
+
+  // "loId:studyDateId" -> rating. A missing key renders as a blank cell,
+  // which is the whole point: untested never looks like tested.
+  const cellByKey = new Map<string, Rating>();
+  for (const performance of performances) {
+    cellByKey.set(
+      `${performance.loId}:${performance.studyDateId}`,
+      performance.rating,
+    );
+  }
+
+  if (objectives.length === 0) {
+    return (
+      <div className="max-w-2xl">
+        <h1 className="text-2xl font-semibold tracking-tight">LO Dashboard</h1>
+        <p className="mt-3 text-sm text-stone-600 dark:text-stone-400">
+          No objectives yet.{" "}
+          <Link href="/lectures/new" className="underline">
+            Add a lecture
+          </Link>{" "}
+          to get started.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">LO Dashboard</h1>
+        <p className="text-sm text-stone-500">
+          {objectives.length} objectives · {dates.length} study days
+        </p>
+      </div>
+
+      <div className="mt-6 flex flex-wrap gap-4 text-xs text-stone-600 dark:text-stone-400">
+        {(Object.keys(CELL_STYLE) as Rating[]).map((rating) => (
+          <span key={rating} className="flex items-center gap-1.5">
+            <span
+              className={`inline-block h-3 w-3 rounded-sm ${CELL_STYLE[rating]}`}
+            />
+            {CELL_LABEL[rating]}
+          </span>
+        ))}
+      </div>
+
+      <div className="mt-6 overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr>
+              <th className="sticky left-0 z-10 min-w-[24rem] border-b border-r border-stone-200 bg-stone-50 px-4 py-3 text-left font-medium dark:border-stone-800 dark:bg-stone-950">
+                Learning objective
+              </th>
+              {dates.map((date) => (
+                <th
+                  key={date.id}
+                  className="border-b border-stone-200 px-2 py-3 text-xs font-medium whitespace-nowrap dark:border-stone-800"
+                >
+                  {date.date.slice(5)}
+                </th>
+              ))}
+              {dates.length === 0 && (
+                <th className="border-b border-stone-200 px-4 py-3 text-left text-xs font-normal text-stone-500 dark:border-stone-800">
+                  No study days recorded yet
+                </th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {objectives.map((objective) => (
+              <tr
+                key={objective.id}
+                className="odd:bg-white even:bg-stone-50/60 dark:odd:bg-stone-950 dark:even:bg-stone-900/40"
+              >
+                <th
+                  scope="row"
+                  className="sticky left-0 z-10 border-r border-stone-200 bg-inherit px-4 py-3 text-left font-normal dark:border-stone-800"
+                >
+                  <span className="block text-[10px] uppercase tracking-wide text-stone-400">
+                    {lectureTitleById.get(objective.lectureId)}
+                  </span>
+                  {objective.text}
+                </th>
+                {dates.map((date) => {
+                  const rating = cellByKey.get(`${objective.id}:${date.id}`);
+                  return (
+                    <td key={date.id} className="px-2 py-3 text-center">
+                      {rating ? (
+                        <span
+                          title={CELL_LABEL[rating]}
+                          className={`inline-block h-5 w-5 rounded-sm ${CELL_STYLE[rating]}`}
+                        />
+                      ) : (
+                        <span className="sr-only">not tested</span>
+                      )}
+                    </td>
+                  );
+                })}
+                {dates.length === 0 && <td />}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

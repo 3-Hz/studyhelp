@@ -29,6 +29,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+/.runlogs
 
 # env files (can opt-in for committing if needed)
 .env*
@@ -39,3 +40,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# eval profiles are machine-specific
+eval.config.ts
+
+# local data — lecture content and performance history are personal
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+/uploads

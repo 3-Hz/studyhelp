@@ -1,65 +1,60 @@
-import Image from "next/image";
+import Link from "next/link";
+import { listLectures } from "@/lib/lectures";
 
-export default function Home() {
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  const lectures = await listLectures();
+  const pending = lectures.filter((l) => !l.committedAt);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <div>
+      <h1 className="text-2xl font-semibold tracking-tight">Lectures</h1>
+
+      {lectures.length === 0 ? (
+        <p className="mt-4 max-w-xl text-sm text-stone-600 dark:text-stone-400">
+          Nothing ingested yet.{" "}
+          <Link href="/lectures/new" className="underline">
+            Add your first lecture
+          </Link>{" "}
+          — upload the deck and any transcript or PDF that goes with it.
+        </p>
+      ) : (
+        <>
+          {pending.length > 0 && (
+            <p className="mt-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+              {pending.length} lecture{pending.length === 1 ? "" : "s"} awaiting
+              review before the objectives reach the dashboard.
+            </p>
+          )}
+
+          <ul className="mt-6 divide-y divide-stone-200 dark:divide-stone-800">
+            {lectures.map((lecture) => (
+              <li
+                key={lecture.id}
+                className="flex items-baseline justify-between gap-4 py-4"
+              >
+                <div>
+                  <Link
+                    href={`/lectures/${lecture.id}/review`}
+                    className="font-medium hover:underline"
+                  >
+                    {lecture.title}
+                  </Link>
+                  <p className="mt-0.5 text-xs text-stone-500">
+                    {lecture.committedAt
+                      ? `${lecture.objectiveCount} objectives on the dashboard`
+                      : "Draft — needs review"}
+                  </p>
+                </div>
+                <span className="text-xs text-stone-400">
+                  {lecture.createdAt.toISOString().slice(0, 10)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }
