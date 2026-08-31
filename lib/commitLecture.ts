@@ -1,15 +1,12 @@
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import type { LectureExtract } from "@/lib/extract";
+import { todayIso } from "@/lib/schedule";
 
 export interface ApprovedObjective {
   /** Index into the draft's learningObjectives, or -1 if added by hand. */
   draftIndex: number;
   text: string;
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 /**

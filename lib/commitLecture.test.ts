@@ -8,6 +8,7 @@ process.env.DATABASE_URL = TEST_DB;
 // Imported after DATABASE_URL is set, since the db module reads it on load.
 const { db, schema } = await import("./db");
 const { commitLecture } = await import("./commitLecture");
+const { todayIso } = await import("./schedule");
 const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
 
 const draft = {
@@ -183,7 +184,6 @@ test("review items start due today at interval zero", async () => {
     where: eq(schema.reviewItems.loId, objectives[0].id),
   });
 
-  const today = new Date().toISOString().slice(0, 10);
-  expect(items[0].dueOn).toBe(today);
+  expect(items[0].dueOn).toBe(todayIso());
   expect(items[0].intervalDays).toBe(0);
 });

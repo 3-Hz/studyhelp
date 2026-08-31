@@ -168,25 +168,44 @@ Files API and are read by the model natively. Extraction returns a **draft** —
 nothing reaches the dashboard until you approve it on the review screen, because
 objective wording is preserved verbatim and worth checking.
 
-Phases 2 (same-day retrieval practice) and 3 (daily 10-question sessions and the
-scheduler) are planned but not built.
+**Phase 2 (same-day retrieval practice) is implemented.**
+
+Studying a committed lecture walks its objectives one at a time: recall each
+objective from memory, summarise the whole lecture, then elaborate on whatever
+did not come back cleanly. Each answer is graded green, yellow, or red with the
+correction and a model answer.
+
+The pacing and the bookkeeping are code, not prompt. Asking for a cue caps the
+answer at yellow — hinted recall is not independent recall, so the model is not
+allowed to grade its way past it. A day's dashboard cell is the *worst* rating
+the objective earned that sitting, since a green that follows a red is recall of
+the correction just given. Objectives never tested stay blank, and finishing
+schedules every concept beneath them on the 0 / 1 / 3 / 7 / 14 / 30 / 60 day
+ladder.
+
+Phase 3 (daily 10-question sessions interleaved across lectures) is planned but
+not built.
 
 ## Data
 
 Everything is local: a SQLite file in the project root, gitignored along with
 `.env.local`. Lecture content and performance history never leave the machine
-except in calls to the Anthropic API.
+except in calls to whichever provider you configure — and with a local runner,
+not even then.
 
 ## Layout
 
 ```
 app/
   api/lectures/             ingest + commit endpoints
+  api/sessions/             start, turn, answer, hint, finish
   dashboard/                the LO grid
   lectures/new/             upload
   lectures/[id]/review/     draft review before commit
+  sessions/[id]/            the study session
 lib/
   db/schema.ts              Drizzle schema
+  schedule.ts               the interval ladder, the hint cap, worst-of-day
   eval/score.ts             scoring an extraction against the answer key
   fixtures/pptxBuilder.ts   minimal OOXML deck builder
   fixtures/syntheticLecture.ts  fabricated lecture + ground truth
@@ -201,4 +220,8 @@ lib/
   extract/chunk.ts          splitting a lecture to fit the context window
   extract/merge.ts          deterministic merge of chunked extractions
   commitLecture.ts          draft → dashboard rows + review items
+  tutor/schema.ts           question, grade and hint contracts
+  tutor/index.ts            asking, grading and cueing
+  session/plan.ts           the session's running order, as a pure function
+  session/sameDay.ts        the session; writes the day and reschedules
 ```

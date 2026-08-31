@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { StartSessionButton } from "@/app/components/StartSessionButton";
 import { listLectures } from "@/lib/lectures";
 
 export const dynamic = "force-dynamic";
@@ -35,21 +36,30 @@ export default async function HomePage() {
                 className="flex items-baseline justify-between gap-4 py-4"
               >
                 <div>
-                  <Link
-                    href={`/lectures/${lecture.id}/review`}
-                    className="font-medium hover:underline"
-                  >
-                    {lecture.title}
-                  </Link>
+                  {lecture.committedAt ? (
+                    <span className="font-medium">{lecture.title}</span>
+                  ) : (
+                    <Link
+                      href={`/lectures/${lecture.id}/review`}
+                      className="font-medium hover:underline"
+                    >
+                      {lecture.title}
+                    </Link>
+                  )}
                   <p className="mt-0.5 text-xs text-stone-500">
                     {lecture.committedAt
                       ? `${lecture.objectiveCount} objectives on the dashboard`
                       : "Draft — needs review"}
                   </p>
                 </div>
-                <span className="text-xs text-stone-400">
-                  {lecture.createdAt.toISOString().slice(0, 10)}
-                </span>
+                <div className="flex items-center gap-4">
+                  <span className="text-xs text-stone-400">
+                    {lecture.createdAt.toISOString().slice(0, 10)}
+                  </span>
+                  {lecture.committedAt && (
+                    <StartSessionButton lectureId={lecture.id} />
+                  )}
+                </div>
               </li>
             ))}
           </ul>

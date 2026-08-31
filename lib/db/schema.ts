@@ -27,6 +27,14 @@ export type Provenance = (typeof PROVENANCE)[number];
 export const REVIEW_KINDS = ["fact", "mechanism", "application"] as const;
 export type ReviewKind = (typeof REVIEW_KINDS)[number];
 
+/**
+ * The same-day review runs these in order (prompt.txt "Same-Day Retrieval
+ * Practice"). Only lo_recall and elaboration name an objective; the summary
+ * stage is about the lecture as a whole.
+ */
+export const SESSION_STAGES = ["lo_recall", "summary", "elaboration"] as const;
+export type SessionStage = (typeof SESSION_STAGES)[number];
+
 const now = sql`(unixepoch())`;
 
 export const lectures = sqliteTable("lectures", {
@@ -183,12 +191,19 @@ export const attempts = sqliteTable(
     sessionId: integer("session_id")
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),
-    loId: integer("lo_id")
-      .notNull()
-      .references(() => learningObjectives.id, { onDelete: "cascade" }),
+    /** Which part of the session this turn belongs to. */
+    stage: text("stage", { enum: SESSION_STAGES }).notNull(),
+    /**
+     * Null for the lecture-summary stage, which assesses the whole lecture
+     * rather than any single objective — and so contributes no dashboard cell.
+     */
+    loId: integer("lo_id").references(() => learningObjectives.id, {
+      onDelete: "cascade",
+    }),
     reviewItemId: integer("review_item_id").references(() => reviewItems.id, {
       onDelete: "set null",
     }),
+    /** The question's shape (free recall, vignette, comparison), which varies within a stage. */
     format: text("format").notNull(),
     question: text("question").notNull(),
     studentAnswer: text("student_answer"),
