@@ -121,7 +121,7 @@ Filled in priority order, each drawing only from what earlier buckets left.
 | 1 | due (4) | `dueOn <= today` | most overdue, then weakness |
 | 2 | weak (2) | red or yellow last rating, or `lapses > 0`, or red/yellow among the last three colours — due or not | weakness |
 | 3 | recent (2) | lecture committed within `RECENT_DAYS` (7) | never answered first, then newest lecture |
-| 4 | interleaved (2) | a lecture not yet represented in this session | same block as the session's modal block first, then most-answered |
+| 4 | interleaved (2) | a lecture not yet represented in this session | same block as the session's modal block first, then the LO with the longest colour history, then the longest interval |
 
 An underfilled bucket hands its slots to the next. A shortfall after bucket 4
 draws from everything left, ranked most overdue then weakest. A null `block` on
@@ -265,9 +265,11 @@ the flag (`lib/session/plan.ts:43`).
   twice.
 - A regression test running a same-day and a daily session on one date,
   asserting the cell holds the worst of both.
-- `sameDay.test.ts` passes unchanged through the refactor. It is the whole
-  safety net for extracting the runner, and runs green before `daily.ts` is
-  written.
+- `sameDay.test.ts` passes unchanged through the refactor, which is the whole
+  safety net for extracting the runner; it runs green before `daily.ts` is
+  written. One test changes earlier, in the merge step: "studying twice in one
+  day updates the cell rather than duplicating it" asserts green after a red
+  session and a green one, which is the bug stated as an expectation.
 
 ## Out of scope
 
