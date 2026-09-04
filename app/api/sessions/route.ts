@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
+import { startDailySession } from "@/lib/session/daily";
 import { startSameDaySession } from "@/lib/session/sameDay";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { lectureId?: number };
-    const lectureId = Number(body.lectureId);
+    const body = (await request.json()) as { lectureId?: number; type?: string };
 
+    if (body.type === "daily") {
+      const sessionId = await startDailySession();
+      return NextResponse.json({ sessionId });
+    }
+
+    const lectureId = Number(body.lectureId);
     if (!Number.isInteger(lectureId)) {
       return NextResponse.json({ error: "Bad lecture id." }, { status: 400 });
     }
