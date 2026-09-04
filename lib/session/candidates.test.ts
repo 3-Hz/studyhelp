@@ -63,6 +63,24 @@ test("a committed lecture contributes one candidate per review item, carrying it
     .values({ date: "2026-09-02" })
     .returning({ id: schema.studyDates.id });
 
+  // Distinct values per field: with commitLecture's defaults, dueOn and
+  // lectureCommittedOn are both today and intervalDays and lapses are both 0,
+  // so a crossed mapping between them would pass unnoticed.
+  await db
+    .update(schema.reviewItems)
+    .set({
+      dueOn: "2026-09-10",
+      intervalDays: 7,
+      lapses: 2,
+      lastRating: "yellow",
+    })
+    .where(eq(schema.reviewItems.loId, objective!.id));
+
+  await db
+    .update(schema.lectures)
+    .set({ committedAt: new Date("2026-08-20T12:00:00Z") })
+    .where(eq(schema.lectures.id, lecture.id));
+
   // Inserted newest first, to prove the history is sorted by date and not by
   // insertion order.
   await db.insert(schema.performances).values({
@@ -76,12 +94,25 @@ test("a committed lecture contributes one candidate per review item, carrying it
     rating: "red",
   });
 
+  const item = await db.query.reviewItems.findFirst({
+    where: eq(schema.reviewItems.loId, objective!.id),
+  });
+
   const candidates = await dailyCandidates();
 
   expect(candidates).toHaveLength(1);
-  expect(candidates[0].loId).toBe(objective!.id);
-  expect(candidates[0].block).toBe("Renal");
-  expect(candidates[0].kind).toBe("fact");
-  expect(candidates[0].history).toEqual(["red", "green"]);
-  expect(candidates[0].loSuspended).toBe(false);
+  expect(candidates[0]).toEqual({
+    reviewItemId: item!.id,
+    loId: objective!.id,
+    lectureId: lecture.id,
+    block: "Renal",
+    kind: "fact",
+    dueOn: "2026-09-10",
+    intervalDays: 7,
+    lapses: 2,
+    lastRating: "yellow",
+    loSuspended: false,
+    lectureCommittedOn: "2026-08-20",
+    history: ["red", "green"],
+  });
 });
