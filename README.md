@@ -227,6 +227,9 @@ lib/
   ingest/parsePptx.ts       OOXML slide + presenter-notes extraction
   ingest/parseTranscript.ts caption cleanup
   ingest/documents.ts       PDF/image parts, with local text fallback
+  ingest/storeSources.ts    uploads → source rows, assets, bytes on disk
+  ingest/buildExtractInput.ts  a lecture's files → one model input
+  ingest/ingestLecture.ts   first upload, later additions, re-extraction
   extract/index.ts          single vs chunked orchestration
   extract/chunk.ts          splitting a lecture to fit the context window
   extract/merge.ts          deterministic merge of chunked extractions

@@ -40,6 +40,10 @@ export const SESSION_STAGES = [
 ] as const;
 export type SessionStage = (typeof SESSION_STAGES)[number];
 
+/** What an uploaded file is, and therefore how it gets parsed. */
+export const ASSET_KINDS = ["slide", "transcript", "pdf", "image"] as const;
+export type AssetKind = (typeof ASSET_KINDS)[number];
+
 const now = sql`(unixepoch())`;
 
 export const lectures = sqliteTable("lectures", {
@@ -59,6 +63,36 @@ export const lectures = sqliteTable("lectures", {
     .default(now),
 });
 
+/**
+ * One row per uploaded file. A lecture routinely has several — the deck, the
+ * PDF export, the video transcript, loose figures — and they arrive at
+ * different times, so files are first-class rather than an attribute of the
+ * content parsed out of them.
+ */
+export const lectureSources = sqliteTable(
+  "lecture_sources",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    lectureId: integer("lecture_id")
+      .notNull()
+      .references(() => lectures.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ASSET_KINDS }).notNull(),
+    filename: text("filename").notNull(),
+    /** 1-based upload order within the lecture. Stable once assigned. */
+    uploadIndex: integer("upload_index").notNull(),
+    /** On-disk path under /uploads, kept so a re-extraction needs no re-upload. */
+    storagePath: text("storage_path"),
+    byteSize: integer("byte_size"),
+    /** Capability shortfalls hit parsing THIS file (PDF read as text, etc.). */
+    warnings: text("warnings", { mode: "json" }),
+    addedAt: integer("added_at", { mode: "timestamp" }).notNull().default(now),
+  },
+  (t) => [
+    unique("lecture_sources_upload_idx").on(t.lectureId, t.uploadIndex),
+    index("lecture_sources_lecture_idx").on(t.lectureId),
+  ],
+);
+
 export const lectureAssets = sqliteTable(
   "lecture_assets",
   {
@@ -66,20 +100,32 @@ export const lectureAssets = sqliteTable(
     lectureId: integer("lecture_id")
       .notNull()
       .references(() => lectures.id, { onDelete: "cascade" }),
-    kind: text("kind", {
-      enum: ["slide", "transcript", "pdf", "image"],
-    }).notNull(),
-    /** Slide number for decks, chunk index for transcripts. 1-based. */
+    /** The file this came out of. */
+    sourceId: integer("source_id").references(() => lectureSources.id, {
+      onDelete: "cascade",
+    }),
+    kind: text("kind", { enum: ASSET_KINDS }).notNull(),
+    /**
+     * Position within its own source: slide N of that deck, chunk N of that
+     * transcript. 1-based, and it restarts for every file.
+     */
     ordinal: integer("ordinal").notNull(),
+    /**
+     * The slide number the model is shown, running continuously across every
+     * deck in the lecture so `slideRefs` can never name two slides. Slides
+     * only; null for everything else.
+     */
+    globalOrdinal: integer("global_ordinal"),
     filename: text("filename"),
     /** Extracted slide body text. Null for assets Claude reads natively. */
     slideText: text("slide_text"),
     /** Presenter notes, kept separate — they carry the real explanations. */
     notesText: text("notes_text"),
-    /** On-disk path under /uploads for PDFs and images, kept for re-extraction. */
-    storagePath: text("storage_path"),
   },
-  (t) => [index("lecture_assets_lecture_idx").on(t.lectureId, t.ordinal)],
+  (t) => [
+    index("lecture_assets_lecture_idx").on(t.lectureId, t.globalOrdinal),
+    unique("lecture_assets_source_ordinal").on(t.sourceId, t.ordinal),
+  ],
 );
 
 export const learningObjectives = sqliteTable(

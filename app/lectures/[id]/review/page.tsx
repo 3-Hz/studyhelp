@@ -1,9 +1,10 @@
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db, schema } from "@/lib/db";
 import type { ExtractionMeta } from "@/lib/extract";
 import type { LectureExtract } from "@/lib/extract/schema";
+import LectureFiles, { type SourceSummary } from "./LectureFiles";
 import ReviewForm from "./ReviewForm";
 
 export default async function ReviewPage({
@@ -23,6 +24,22 @@ export default async function ReviewPage({
   const assets = await db.query.lectureAssets.findMany({
     where: eq(schema.lectureAssets.lectureId, lectureId),
   });
+
+  const sources = await db
+    .select()
+    .from(schema.lectureSources)
+    .where(eq(schema.lectureSources.lectureId, lectureId))
+    .orderBy(asc(schema.lectureSources.uploadIndex));
+
+  const sourceById = new Map(sources.map((source) => [source.id, source]));
+
+  const sourceSummaries: SourceSummary[] = sources.map((source) => ({
+    id: source.id,
+    filename: source.filename,
+    kind: source.kind,
+    itemCount: assets.filter((asset) => asset.sourceId === source.id).length,
+    byteSize: source.byteSize,
+  }));
 
   const draft = lecture.draftExtract as LectureExtract | null;
 
@@ -50,20 +67,33 @@ export default async function ReviewPage({
           {lecture.title}
         </h1>
         <p className="mt-3 text-sm text-stone-600 dark:text-stone-400">
-          No extraction is attached to this lecture yet.
+          No extraction is attached to this lecture yet. Its files are below —
+          adding another runs the extraction again.
         </p>
+        <LectureFiles lectureId={lectureId} sources={sourceSummaries} />
       </div>
     );
   }
 
-  // Slide text, keyed by slide number, so each objective sits beside its source.
-  const slideTextByOrdinal = new Map<number, string>();
+  // Keyed by the global slide number the model was shown, which is what
+  // `slideRefs` points at. Several decks share one run of numbers, so the label
+  // says which file a slide actually came from and where it sits inside it.
+  const slidesByOrdinal = new Map<number, { text: string; label: string }>();
   for (const asset of assets) {
     if (asset.kind !== "slide") continue;
     const body = [asset.slideText, asset.notesText]
       .filter((text) => text && text.length > 0)
       .join("\n\n— presenter notes —\n");
-    slideTextByOrdinal.set(asset.ordinal, body);
+    const filename =
+      (asset.sourceId === null
+        ? undefined
+        : sourceById.get(asset.sourceId)?.filename) ?? asset.filename;
+    slidesByOrdinal.set(asset.globalOrdinal ?? asset.ordinal, {
+      text: body,
+      label: filename
+        ? `${filename} · slide ${asset.ordinal}`
+        : `Slide ${asset.ordinal}`,
+    });
   }
 
   const meta = lecture.extractionMeta as ExtractionMeta | null;
@@ -104,10 +134,12 @@ export default async function ReviewPage({
         </div>
       )}
 
+      <LectureFiles lectureId={lectureId} sources={sourceSummaries} />
+
       <ReviewForm
         lectureId={lectureId}
         draft={draft}
-        slideTextByOrdinal={Object.fromEntries(slideTextByOrdinal)}
+        slidesByOrdinal={Object.fromEntries(slidesByOrdinal)}
       />
     </div>
   );

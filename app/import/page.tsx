@@ -2,8 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-
-const ACCEPT = ".pptx,.pdf,.txt,.vtt,.srt,.md,.png,.jpg,.jpeg,.gif,.webp";
+import { ACCEPT } from "@/lib/ingest/accept";
 
 export default function NewLecturePage() {
   const router = useRouter();
@@ -81,8 +80,8 @@ export default function NewLecturePage() {
           />
           {files.length > 0 && (
             <ul className="mt-3 space-y-1 text-sm text-stone-600 dark:text-stone-400">
-              {files.map((file) => (
-                <li key={file.name}>
+              {files.map((file, index) => (
+                <li key={`${file.name}-${index}`}>
                   {file.name}{" "}
                   <span className="text-stone-400">
                     ({Math.round(file.size / 1024)} KB)

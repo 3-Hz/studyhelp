@@ -1,10 +1,14 @@
 import type { LanguageModel, UserContent } from "ai";
-import type { ParsedSlide } from "@/lib/ingest/parsePptx";
 import type { ModelFilePart } from "@/lib/ingest/documents";
 import { describeProfile, type ModelProfile } from "@/lib/llm/config";
 import { resolveModel } from "@/lib/llm/provider";
 import { generateStructured } from "@/lib/llm/structured";
-import { chunkLecture, type LectureChunk } from "./chunk";
+import {
+  chunkLecture,
+  type ExtractSlide,
+  type LectureChunk,
+  type TranscriptSection,
+} from "./chunk";
 import { mergeExtracts } from "./merge";
 import { CHUNK_NOTE, EXTRACTION_SYSTEM, LectureExtract } from "./schema";
 
@@ -12,10 +16,12 @@ export { LectureExtract } from "./schema";
 export type { LectureExtract as LectureExtractType } from "./schema";
 
 export interface ExtractInput {
-  slides: ParsedSlide[];
-  transcriptChunks: string[];
+  slides: ExtractSlide[];
+  transcriptChunks: TranscriptSection[];
   /** PDF/image content already prepared for this profile's capabilities. */
   documentParts: ModelFilePart[];
+  /** Roughly what documentParts will cost, so chunking can reserve for them. */
+  documentTokens?: number;
 }
 
 export interface ExtractionMeta {
@@ -42,6 +48,7 @@ export async function extractLecture(
   const chunks = chunkLecture(
     { slides: input.slides, transcriptChunks: input.transcriptChunks },
     profile,
+    input.documentTokens ?? 0,
   );
 
   const baseMeta = {
@@ -132,4 +139,4 @@ function buildContent(
   return parts as UserContent;
 }
 
-export type { LectureChunk };
+export type { ExtractSlide, LectureChunk, TranscriptSection };

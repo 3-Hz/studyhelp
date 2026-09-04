@@ -50,3 +50,4 @@ eval.config.ts
 *.db-wal
 *.db-shm
 /uploads
+/.test-uploads-*

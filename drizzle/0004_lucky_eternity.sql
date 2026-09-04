@@ -1,0 +1,1 @@
+ALTER TABLE `lecture_assets` DROP COLUMN `storage_path`;

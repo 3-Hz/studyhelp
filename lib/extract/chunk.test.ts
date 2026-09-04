@@ -73,7 +73,10 @@ test("transcript sections are chunked alongside slides", () => {
   const chunks = chunkLecture(
     {
       slides: [slide(1, 100)],
-      transcriptChunks: ["a".repeat(3_000), "b".repeat(3_000)],
+      transcriptChunks: [
+        { text: "a".repeat(3_000) },
+        { text: "b".repeat(3_000) },
+      ],
     },
     profile(),
   );
@@ -87,4 +90,89 @@ test("an empty lecture produces no chunks", () => {
   expect(chunkLecture({ slides: [], transcriptChunks: [] }, profile())).toEqual(
     [],
   );
+});
+
+test("each deck gets its own header, so runs of slides stay separable", () => {
+  const chunks = chunkLecture(
+    {
+      slides: [
+        { ...slide(1, 50), sourceLabel: "part1.pptx" },
+        { ...slide(2, 50), sourceLabel: "part1.pptx" },
+        { ...slide(3, 50), sourceLabel: "part2.pptx" },
+      ],
+      transcriptChunks: [],
+    },
+    profile(),
+  );
+
+  const combined = chunks.map((c) => c.text).join("\n");
+  expect(combined).toContain("# Slide deck: part1.pptx");
+  expect(combined).toContain("# Slide deck: part2.pptx");
+  // One header per file, not one per slide.
+  expect(combined.match(/# Slide deck:/g)).toHaveLength(2);
+  expect(combined.indexOf("part1.pptx")).toBeLessThan(
+    combined.indexOf("part2.pptx"),
+  );
+});
+
+test("transcripts from different files are headed separately", () => {
+  const chunks = chunkLecture(
+    {
+      slides: [],
+      transcriptChunks: [
+        { text: "first half", sourceLabel: "a.vtt" },
+        { text: "still first half", sourceLabel: "a.vtt" },
+        { text: "second half", sourceLabel: "b.vtt" },
+      ],
+    },
+    profile(),
+  );
+
+  const combined = chunks.map((c) => c.text).join("\n");
+  expect(combined).toContain("# Lecture transcript: a.vtt");
+  expect(combined).toContain("# Lecture transcript: b.vtt");
+  expect(combined.match(/# Lecture transcript:/g)).toHaveLength(2);
+});
+
+test("unlabelled slides keep the plain header", () => {
+  const chunks = chunkLecture(
+    { slides: [slide(1, 50)], transcriptChunks: [] },
+    profile(),
+  );
+  expect(chunks[0].text).toContain(
+    "# Slide deck (body text and presenter notes)",
+  );
+});
+
+test("reserved document tokens come off the budget", () => {
+  const input = {
+    slides: [slide(1, 4_000), slide(2, 4_000)],
+    transcriptChunks: [],
+  };
+
+  // Comfortable in one call when nothing else is competing for the context.
+  expect(chunkLecture(input, profile())).toHaveLength(1);
+
+  // A PDF riding along with the first chunk has to be paid for.
+  expect(chunkLecture(input, profile(), 3_000).length).toBeGreaterThan(1);
+});
+
+test("a lecture crowded out by its documents fails loudly", () => {
+  expect(() =>
+    chunkLecture(
+      { slides: [slide(1, 4_000)], transcriptChunks: [] },
+      profile(),
+      4_500,
+    ),
+  ).toThrow(/PDFs and images have already claimed/);
+});
+
+test("documents that fill the whole budget say so, not that a slide is too big", () => {
+  expect(() =>
+    chunkLecture(
+      { slides: [slide(1, 40)], transcriptChunks: [] },
+      profile(),
+      99_000,
+    ),
+  ).toThrow(/attached PDFs and images are about 99000 tokens on their own/);
 });

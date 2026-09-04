@@ -9,9 +9,22 @@ export interface LectureChunk {
   text: string;
 }
 
+/**
+ * A slide, plus which uploaded file it came from. A lecture often has more than
+ * one deck, and the model has to be told where one ends and the next begins.
+ */
+export interface ExtractSlide extends ParsedSlide {
+  sourceLabel?: string;
+}
+
+export interface TranscriptSection {
+  text: string;
+  sourceLabel?: string;
+}
+
 export interface ChunkInput {
-  slides: ParsedSlide[];
-  transcriptChunks: string[];
+  slides: ExtractSlide[];
+  transcriptChunks: TranscriptSection[];
 }
 
 /**
@@ -19,24 +32,45 @@ export interface ChunkInput {
  *
  * A slide is the atomic unit: splitting mid-slide would separate a slide from
  * its presenter notes, which is exactly the pairing the extraction depends on.
+ *
+ * `reservedTokens` covers PDFs and images, which ride along with the first
+ * chunk. They cost tokens no measurement of the text can see, so the caller
+ * declares them and they come off the budget before anything is packed.
  */
 export function chunkLecture(
   input: ChunkInput,
   profile: ModelProfile,
+  reservedTokens = 0,
 ): LectureChunk[] {
-  const budget = inputBudget(profile);
+  const fullBudget = inputBudget(profile);
+  const budget = Math.max(0, fullBudget - reservedTokens);
   const units = buildUnits(input);
 
   if (units.length === 0) return [];
+
+  // Documents alone over budget leaves nothing for the lecture itself. Say so
+  // directly rather than reporting whichever slide happened to be measured
+  // first as being "over the 0-token budget".
+  if (reservedTokens >= fullBudget) {
+    throw new Error(
+      `The attached PDFs and images are about ${reservedTokens} tokens on their own, which fills ` +
+        `the whole ${fullBudget}-token input budget for ${profile.providerId}:${profile.modelId} and ` +
+        "leaves no room for the slides or transcript. Remove some, or use a model with a larger context.",
+    );
+  }
 
   // An oversized single unit cannot be honoured by silently truncating —
   // that would drop content the student believes was processed.
   for (const unit of units) {
     if (estimateTokens(unit.text) > budget) {
+      const reserved =
+        reservedTokens > 0
+          ? ` Attached PDFs and images have already claimed about ${reservedTokens} of the ${fullBudget}-token budget; removing some would make room.`
+          : "";
       throw new Error(
         `${unit.label} alone is about ${estimateTokens(unit.text)} tokens, over the ` +
           `${budget}-token input budget for ${profile.providerId}:${profile.modelId}. ` +
-          `Use a model with a larger context, or raise LLM_${profile.role.toUpperCase()}_CONTEXT_TOKENS if this model supports more.`,
+          `Use a model with a larger context, or raise LLM_${profile.role.toUpperCase()}_CONTEXT_TOKENS if this model supports more.${reserved}`,
       );
     }
   }
@@ -79,26 +113,44 @@ interface Unit {
 function buildUnits(input: ChunkInput): Unit[] {
   const units: Unit[] = [];
 
-  if (input.slides.length > 0) {
-    units.push({
-      label: "The slide-deck header",
-      text: "# Slide deck (body text and presenter notes)",
-    });
-    for (const slide of input.slides) {
+  // A header per file, so consecutive decks never read as one run of slides.
+  // Slide numbers stay globally unique across them, which is what `slideRefs`
+  // resolves against.
+  let deckLabel: string | undefined;
+  let firstDeck = true;
+  for (const slide of input.slides) {
+    if (firstDeck || slide.sourceLabel !== deckLabel) {
       units.push({
-        label: `Slide ${slide.ordinal}`,
-        text: formatSlideForModel(slide),
-        ordinal: slide.ordinal,
+        label: "The slide-deck header",
+        text: slide.sourceLabel
+          ? `# Slide deck: ${slide.sourceLabel} (body text and presenter notes)`
+          : "# Slide deck (body text and presenter notes)",
       });
+      deckLabel = slide.sourceLabel;
+      firstDeck = false;
     }
+    units.push({
+      label: `Slide ${slide.ordinal}`,
+      text: formatSlideForModel(slide),
+      ordinal: slide.ordinal,
+    });
   }
 
-  if (input.transcriptChunks.length > 0) {
-    units.push({ label: "The transcript header", text: "# Lecture transcript" });
-    input.transcriptChunks.forEach((text, i) => {
-      units.push({ label: `Transcript section ${i + 1}`, text });
-    });
-  }
+  let transcriptLabel: string | undefined;
+  let firstTranscript = true;
+  input.transcriptChunks.forEach((section, i) => {
+    if (firstTranscript || section.sourceLabel !== transcriptLabel) {
+      units.push({
+        label: "The transcript header",
+        text: section.sourceLabel
+          ? `# Lecture transcript: ${section.sourceLabel}`
+          : "# Lecture transcript",
+      });
+      transcriptLabel = section.sourceLabel;
+      firstTranscript = false;
+    }
+    units.push({ label: `Transcript section ${i + 1}`, text: section.text });
+  });
 
   return units;
 }
@@ -107,6 +159,7 @@ function buildUnits(input: ChunkInput): Unit[] {
 export function fitsInOneCall(
   input: ChunkInput,
   profile: ModelProfile,
+  reservedTokens = 0,
 ): boolean {
-  return chunkLecture(input, profile).length <= 1;
+  return chunkLecture(input, profile, reservedTokens).length <= 1;
 }

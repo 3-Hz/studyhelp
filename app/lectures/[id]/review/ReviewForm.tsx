@@ -18,14 +18,20 @@ const PROVENANCE_STYLE: Record<string, string> = {
   supplemental: "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200",
 };
 
+export interface SlideSource {
+  text: string;
+  /** Which file this slide came from, and its number inside that file. */
+  label: string;
+}
+
 export default function ReviewForm({
   lectureId,
   draft,
-  slideTextByOrdinal,
+  slidesByOrdinal,
 }: {
   lectureId: number;
   draft: LectureExtract;
-  slideTextByOrdinal: Record<number, string>;
+  slidesByOrdinal: Record<number, SlideSource>;
 }) {
   const router = useRouter();
   const [objectives, setObjectives] = useState<DraftObjective[]>(
@@ -127,12 +133,15 @@ export default function ReviewForm({
                       </summary>
                       <div className="mt-2 space-y-2">
                         {objective.slideRefs.map((ref) => (
-                          <pre
-                            key={ref}
-                            className="overflow-x-auto whitespace-pre-wrap rounded bg-stone-100 p-3 font-mono text-xs text-stone-700 dark:bg-stone-900 dark:text-stone-300"
-                          >
-                            {slideTextByOrdinal[ref] ?? "(slide text unavailable)"}
-                          </pre>
+                          <div key={ref}>
+                            <p className="font-mono text-[10px] uppercase tracking-wide text-stone-400">
+                              {slidesByOrdinal[ref]?.label ?? `slide ${ref}`}
+                            </p>
+                            <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded bg-stone-100 p-3 font-mono text-xs text-stone-700 dark:bg-stone-900 dark:text-stone-300">
+                              {slidesByOrdinal[ref]?.text ??
+                                "(slide text unavailable)"}
+                            </pre>
+                          </div>
                         ))}
                       </div>
                     </details>
