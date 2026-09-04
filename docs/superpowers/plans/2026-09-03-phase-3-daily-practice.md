@@ -337,10 +337,7 @@ type AnyKind = SessionKind<any>;
 
 async function kindFor(session: SessionRow): Promise<AnyKind> {
   if (session.type === "daily") {
-    // Imported lazily: daily.ts imports selection, which nothing else needs
-    // when a same-day session is running.
-    const { dailyKind } = await import("./daily");
-    return dailyKind;
+    throw new Error("Daily sessions are not implemented yet.");
   }
   return sameDayKind;
 }
@@ -652,6 +649,10 @@ async function studyDateFor(date: string): Promise<number> {
 }
 ```
 
+Daily practice does not exist yet, so `kindFor` throws for it rather than
+importing a module that is four tasks away — `bun run typecheck` at the end of
+this task would not resolve it. Task 6 replaces the throw.
+
 `sessions.debrief` does not exist until Task 4. Until then the spread `...(debrief ? { debrief } : {})` never fires, because no strategy defines `closeOut` yet — leave the line in place and it starts working when the column lands.
 
 - [ ] **Step 3: Reduce `sameDay.ts` to a strategy**
@@ -912,9 +913,17 @@ test("no two slots share an objective while the pool allows it", () => {
 });
 
 test("one lecture cannot take more than three slots while others are available", () => {
+  // Both groups are due, so the due bucket has somewhere else to go once the
+  // cap binds. With only one lecture due, the documented relaxation would fire
+  // and a fourth slot from lecture 1 would be correct.
   const candidates = [
     ...many(8, (i) => ({ lectureId: 1, loId: i + 1, dueOn: "2026-08-01" })),
-    ...many(8, (i) => ({ reviewItemId: i + 9, lectureId: i + 2, loId: i + 20 })),
+    ...many(8, (i) => ({
+      reviewItemId: i + 9,
+      lectureId: i + 2,
+      loId: i + 20,
+      dueOn: "2026-08-02",
+    })),
   ];
 
   const plan = select(candidates, { today: TODAY });
@@ -2161,15 +2170,32 @@ export const dailyKind: SessionKind<DailyMaterial> = {
 };
 ```
 
-- [ ] **Step 6: Run the tests**
+- [ ] **Step 6: Let the runner reach the daily strategy**
+
+Task 2 left `kindFor` in `lib/session/runner.ts` throwing for daily sessions,
+because `daily.ts` did not exist. It does now. Replace the throw:
+
+```ts
+async function kindFor(session: SessionRow): Promise<AnyKind> {
+  if (session.type === "daily") {
+    // Imported lazily: daily.ts pulls in selection, which nothing needs while
+    // a same-day session is running.
+    const { dailyKind } = await import("./daily");
+    return dailyKind;
+  }
+  return sameDayKind;
+}
+```
+
+- [ ] **Step 7: Run the tests**
 
 Run: `bun test && bun run typecheck`
 Expected: PASS, including the whole existing suite.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add lib/session/daily.ts lib/session/daily.test.ts lib/tutor
+git add lib/session lib/tutor
 git commit -m "Add the daily interleaved practice session"
 ```
 
