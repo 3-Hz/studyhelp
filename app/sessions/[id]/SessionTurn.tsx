@@ -1,18 +1,22 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Rating } from "@/lib/db/schema";
-import type { GradeOutput } from "@/lib/tutor/schema";
+import type { DebriefOutput, GradeOutput } from "@/lib/tutor/schema";
+import { Debrief } from "./Debrief";
 
 interface Turn {
   attemptId: number;
-  stage: "lo_recall" | "summary" | "elaboration";
+  stage: "lo_recall" | "summary" | "elaboration" | "daily";
   loId: number | null;
   objective: string | null;
+  lectureTitle: string | null;
   format: string;
   question: string;
   hintsUsed: boolean;
+  position: number;
+  total: number | null;
 }
 
 interface Feedback {
@@ -25,6 +29,7 @@ const STAGE_LABEL: Record<Turn["stage"], string> = {
   lo_recall: "Objective recall",
   summary: "Lecture summary",
   elaboration: "Elaboration",
+  daily: "Daily practice",
 };
 
 const RATING_STYLE: Record<Rating, string> = {
@@ -54,13 +59,11 @@ async function post<T>(url: string, body: unknown): Promise<T> {
 
 export default function SessionTurn({
   sessionId,
-  objectiveCount,
+  heading,
 }: {
   sessionId: number;
-  objectiveCount: number;
+  heading: string;
 }) {
-  const router = useRouter();
-
   const [turn, setTurn] = useState<Turn | null>(null);
   const [done, setDone] = useState(false);
   const [answer, setAnswer] = useState("");
@@ -68,7 +71,9 @@ export default function SessionTurn({
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [busy, setBusy] = useState<null | "loading" | "grading" | "hinting" | "finishing">("loading");
   const [error, setError] = useState<string | null>(null);
-  const [graded, setGraded] = useState(0);
+  const [result, setResult] = useState<
+    { cellsWritten: number; debrief: DebriefOutput | null } | null
+  >(null);
 
   // Two effect passes in development would otherwise fire two turn requests.
   const loading = useRef(false);
@@ -112,7 +117,6 @@ export default function SessionTurn({
         answer,
       });
       setFeedback(result);
-      setGraded((count) => count + 1);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Grading failed.");
     } finally {
@@ -141,10 +145,14 @@ export default function SessionTurn({
     setBusy("finishing");
     setError(null);
     try {
-      await post(`/api/sessions/${sessionId}/finish`, {});
-      router.push("/dashboard");
+      const finished = await post<{
+        cellsWritten: number;
+        debrief: DebriefOutput | null;
+      }>(`/api/sessions/${sessionId}/finish`, {});
+      setResult(finished);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not finish.");
+    } finally {
       setBusy(null);
     }
   }
@@ -153,10 +161,28 @@ export default function SessionTurn({
     return <p className="mt-8 text-sm text-stone-500">Composing a question…</p>;
   }
 
+  if (result) {
+    return (
+      <div className="mt-8">
+        <h2 className="text-lg font-medium">Recorded.</h2>
+        <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
+          {result.cellsWritten} dashboard cell
+          {result.cellsWritten === 1 ? "" : "s"} written for today.
+        </p>
+        {result.debrief && <Debrief debrief={result.debrief} />}
+        <Link href="/dashboard" className="mt-6 inline-block text-sm underline">
+          Back to the dashboard
+        </Link>
+      </div>
+    );
+  }
+
   if (done) {
     return (
       <div className="mt-8">
-        <h2 className="text-lg font-medium">That is the whole lecture.</h2>
+        <h2 className="text-lg font-medium">
+          {heading === "Daily practice" ? "That is today's ten." : "That is the whole lecture."}
+        </h2>
         <p className="mt-2 max-w-xl text-sm text-stone-600 dark:text-stone-400">
           Finishing records one dashboard cell per objective — the worst rating
           it earned today — and schedules everything beneath it for review.
@@ -196,9 +222,15 @@ export default function SessionTurn({
           {STAGE_LABEL[turn.stage]} · {turn.format.replace(/_/g, " ")}
         </span>
         <span>
-          {graded} answered · {objectiveCount} objectives
+          {turn.total ? `${turn.position} of ${turn.total}` : `Question ${turn.position}`}
         </span>
       </div>
+
+      {turn.lectureTitle && (
+        <p className="mt-3 text-[10px] uppercase tracking-wide text-stone-400">
+          {turn.lectureTitle}
+        </p>
+      )}
 
       {turn.objective && (
         <p className="mt-3 rounded-md border-l-2 border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300">
