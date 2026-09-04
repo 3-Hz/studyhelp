@@ -28,11 +28,16 @@ export const REVIEW_KINDS = ["fact", "mechanism", "application"] as const;
 export type ReviewKind = (typeof REVIEW_KINDS)[number];
 
 /**
- * The same-day review runs these in order (prompt.txt "Same-Day Retrieval
- * Practice"). Only lo_recall and elaboration name an objective; the summary
- * stage is about the lecture as a whole.
+ * The same-day review runs lo_recall → summary → elaboration in order
+ * (prompt.txt "Same-Day Retrieval Practice"). Daily practice has one stage:
+ * its variety comes from the question format, not from a running order.
  */
-export const SESSION_STAGES = ["lo_recall", "summary", "elaboration"] as const;
+export const SESSION_STAGES = [
+  "lo_recall",
+  "summary",
+  "elaboration",
+  "daily",
+] as const;
 export type SessionStage = (typeof SESSION_STAGES)[number];
 
 const now = sql`(unixepoch())`;
@@ -162,6 +167,15 @@ export const sessions = sqliteTable("sessions", {
   lectureId: integer("lecture_id").references(() => lectures.id, {
     onDelete: "set null",
   }),
+  /**
+   * The daily session's chosen slots, frozen at start. Selection depends on
+   * the whole corpus at that moment, so freezing it keeps a reload, a tie
+   * break and the "4 of 10" counter stable — and leaves the session's
+   * reasoning readable afterwards.
+   */
+  plan: text("plan", { mode: "json" }),
+  /** The close-out summary, written when the session is finished. */
+  debrief: text("debrief", { mode: "json" }),
   startedAt: integer("started_at", { mode: "timestamp" })
     .notNull()
     .default(now),
