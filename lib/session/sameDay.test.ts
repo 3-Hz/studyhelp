@@ -9,13 +9,13 @@ process.env.DATABASE_URL = TEST_DB;
 const { db, schema } = await import("../db");
 const { commitLecture } = await import("../commitLecture");
 const { todayIso } = await import("../schedule");
+const { startSameDaySession } = await import("./sameDay");
 const {
   currentTurn,
   finishSession,
   requestHint,
-  startSameDaySession,
   submitAnswer,
-} = await import("./sameDay");
+} = await import("./runner");
 const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
 
 type Rating = "green" | "yellow" | "red";

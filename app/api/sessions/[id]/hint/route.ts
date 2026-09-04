@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requestHint } from "@/lib/session/sameDay";
+import { requestHint } from "@/lib/session/runner";
 
 export async function POST(
   request: Request,

@@ -28,6 +28,8 @@ export interface TurnContext {
   concepts: ConceptContext[];
   /** Formats already used this session, so the next question varies. */
   usedFormats?: QuestionFormat[];
+  /** The formats this turn may use. Enforced through the output schema. */
+  allowedFormats?: QuestionFormat[];
 }
 
 /**

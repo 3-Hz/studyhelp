@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { finishSession } from "@/lib/session/sameDay";
+import { finishSession } from "@/lib/session/runner";
 
 export async function POST(
   _request: Request,

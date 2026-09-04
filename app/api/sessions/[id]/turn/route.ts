@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { currentTurn } from "@/lib/session/sameDay";
+import { currentTurn } from "@/lib/session/runner";
 
 /**
  * The question in hand, generated on first request and persisted, so this is
