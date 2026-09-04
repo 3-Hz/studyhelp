@@ -242,9 +242,19 @@ test("the default mix is four due, two weak, two recent, two interleaved when th
     dueOn: "2099-01-01",
     lastRating: "yellow", // weakness 1
   });
+  // A third recent-eligible candidate, committed a day earlier than the two
+  // above so it ranks behind them and stays on the table at quota 2. Without
+  // it, a recent quota drifting to 3 has nothing extra to take and the tally
+  // does not move.
+  const spareRecent = candidate({
+    reviewItemId: 12,
+    lectureId: 12,
+    dueOn: "2099-01-01",
+    lectureCommittedOn: "2026-08-27",
+  });
 
   const plan = select(
-    [...due, ...weak, ...recent, ...filler, spareWeak],
+    [...due, ...weak, ...recent, ...filler, spareWeak, spareRecent],
     { today: TODAY },
   );
 
@@ -257,9 +267,15 @@ test("the default mix is four due, two weak, two recent, two interleaved when th
   };
   for (const slot of plan) tally[slot.bucket]++;
 
-  // This is the headline mix from prompt.txt: a fixture rich enough that
-  // every bucket could overfill catches a quota silently drifting from
-  // 4/2/2/2, which a fixture leaving buckets starved cannot.
+  // This is the headline mix from prompt.txt. Due, weak and recent each have
+  // somewhere to overfill from (due indirectly, via the carry its unfilled
+  // want hands to weak; weak and recent from a spare candidate each keeps on
+  // the table at the correct quota) so a quota silently drifting on any of
+  // them moves this tally. Interleaved cannot be exercised this way in this
+  // fixture: due, weak and recent already consume exactly eight of the ten
+  // slots, so its own "want" is capped by the two that remain regardless of
+  // its quota constant — a fixture change can't fix that, only a larger
+  // session could.
   expect(tally).toEqual({ due: 4, weak: 2, recent: 2, interleaved: 2, fill: 0 });
 });
 
