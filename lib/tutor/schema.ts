@@ -106,6 +106,25 @@ export const HintOutput = z.object({
 export type HintOutput = z.infer<typeof HintOutput>;
 
 /**
+ * The close-out summary (prompt.txt "Session Completion").
+ *
+ * Short arrays, not paragraphs: the student has just done ten retrievals, and
+ * a wall of text at the end invites rereading instead of recall.
+ */
+export const DebriefOutput = z.object({
+  heldUp: z.array(z.string()).describe("What the student retrieved well."),
+  shaky: z.array(z.string()).describe("What was partial or needed cues."),
+  misconceptions: z
+    .array(z.string())
+    .describe("Specific wrong beliefs the session surfaced. Empty if none did."),
+  focusNext: z
+    .string()
+    .describe("The single most useful thing to work on next, in one sentence."),
+});
+
+export type DebriefOutput = z.infer<typeof DebriefOutput>;
+
+/**
  * Frozen instruction block, in the style of EXTRACTION_SYSTEM: kept byte-stable
  * so it forms a cacheable prefix. Nothing dynamic may be interpolated — the
  * lecture material and the stage instructions go in the user message.

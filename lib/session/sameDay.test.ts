@@ -67,6 +67,15 @@ function stubTutor(ratings: Rating[]): TutorDeps {
       modelAnswer: "A model answer.",
     }),
     giveHint: async () => ({ hint: "Think about the precursor protein." }),
+    // Unused at runtime: the same-day strategy has no closeOut, so this is
+    // never called. Present only so this object structurally satisfies
+    // TutorDeps, which every strategy's deps share.
+    summariseSession: async () => ({
+      heldUp: [],
+      shaky: [],
+      misconceptions: [],
+      focusNext: "",
+    }),
   } as TutorDeps;
 }
 

@@ -12,9 +12,11 @@ import {
   askQuestion,
   gradeAnswer,
   giveHint,
+  summariseSession,
+  type DebriefOutput,
   type QuestionFormat,
 } from "@/lib/tutor";
-import type { AttemptRow, SessionKind, SessionRow } from "./kind";
+import type { AttemptRow, SessionKind, SessionRow, TutorDeps } from "./kind";
 import { sameDayKind } from "./sameDay";
 
 /**
@@ -25,14 +27,9 @@ import { sameDayKind } from "./sameDay";
  * advisory until capRating has had the last word.
  */
 
-/** Injectable so tests can run a whole session without a provider. */
-export interface TutorDeps {
-  askQuestion: typeof askQuestion;
-  gradeAnswer: typeof gradeAnswer;
-  giveHint: typeof giveHint;
-}
+export type { TutorDeps } from "./kind";
 
-const REAL_TUTOR: TutorDeps = { askQuestion, gradeAnswer, giveHint };
+const REAL_TUTOR: TutorDeps = { askQuestion, gradeAnswer, giveHint, summariseSession };
 
 export interface Turn {
   attemptId: number;
@@ -230,6 +227,8 @@ export interface SessionResult {
   cellsWritten: number;
   reviewItemsRescheduled: number;
   ratingByLo: Record<number, Rating>;
+  /** Null when the session has no close-out, or the summary call failed. */
+  debrief: DebriefOutput | null;
 }
 
 /**
@@ -339,6 +338,7 @@ export async function finishSession(
     cellsWritten: testedLoIds.length,
     reviewItemsRescheduled,
     ratingByLo,
+    debrief: (debrief as DebriefOutput) ?? null,
   };
 }
 

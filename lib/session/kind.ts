@@ -1,9 +1,23 @@
 import type * as schema from "@/lib/db/schema";
 import type { Rating, SessionStage } from "@/lib/db/schema";
 import type { QuestionFormat, TurnContext } from "@/lib/tutor";
+import type {
+  askQuestion,
+  gradeAnswer,
+  giveHint,
+  summariseSession,
+} from "@/lib/tutor";
 
 export type SessionRow = typeof schema.sessions.$inferSelect;
 export type AttemptRow = typeof schema.attempts.$inferSelect;
+
+/** Injectable so tests can run a whole session without a provider. */
+export interface TutorDeps {
+  askQuestion: typeof askQuestion;
+  gradeAnswer: typeof gradeAnswer;
+  giveHint: typeof giveHint;
+  summariseSession: typeof summariseSession;
+}
 
 /** Enough to identify what a turn is about, asked or already answered. */
 export interface TurnRef {
@@ -44,6 +58,6 @@ export interface SessionKind<M> {
     session: SessionRow;
     attempts: AttemptRow[];
     material: M;
-    deps: unknown;
+    deps: TutorDeps;
   }): Promise<unknown>;
 }

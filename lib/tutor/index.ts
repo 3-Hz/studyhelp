@@ -3,6 +3,7 @@ import type { SessionStage } from "@/lib/db/schema";
 import { profileFor, type ModelProfile } from "@/lib/llm/config";
 import { generateStructured } from "@/lib/llm/structured";
 import {
+  DebriefOutput,
   GradeOutput,
   HINTED_NOTE,
   HintOutput,
@@ -183,6 +184,53 @@ export async function giveHint(
     model: options.model,
     schema: HintOutput,
     schemaName: "hint",
+    system: TUTOR_SYSTEM,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  return value;
+}
+
+export interface DebriefRequest {
+  answered: {
+    question: string;
+    rating: string;
+    missing: string[];
+    incorrect: string[];
+  }[];
+}
+
+/**
+ * The session's close-out. Never marks anything mastered: one correct answer
+ * is not mastery, and saying so would undo the point of the ladder.
+ */
+export async function summariseSession(
+  request: DebriefRequest,
+  options: TutorOptions = {},
+): Promise<DebriefOutput> {
+  const profile = options.profile ?? profileFor("tutor");
+
+  const prompt = [
+    "Summarise this retrieval session for the student.",
+    "Be brief. Do not call anything mastered — that takes repeated independent",
+    "retrieval across increasing intervals, not one good answer.",
+    "",
+    ...request.answered.map((attempt, index) =>
+      [
+        `${index + 1}. [${attempt.rating}] ${attempt.question}`,
+        attempt.missing.length ? `   missing: ${attempt.missing.join("; ")}` : "",
+        attempt.incorrect.length ? `   wrong: ${attempt.incorrect.join("; ")}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    ),
+  ].join("\n");
+
+  const { value } = await generateStructured({
+    profile,
+    model: options.model,
+    schema: DebriefOutput,
+    schemaName: "debrief",
     system: TUTOR_SYSTEM,
     messages: [{ role: "user", content: prompt }],
   });

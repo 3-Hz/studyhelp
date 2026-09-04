@@ -90,6 +90,12 @@ function stubTutor(ratings: Rating[]): TutorDeps {
       modelAnswer: "A model answer.",
     }),
     giveHint: async () => ({ hint: "A cue." }),
+    summariseSession: async () => ({
+      heldUp: ["Fibril structure"],
+      shaky: ["AL versus ATTR"],
+      misconceptions: [],
+      focusNext: "Practise distinguishing the two precursor proteins.",
+    }),
   } as TutorDeps;
 }
 
@@ -168,7 +174,7 @@ test("every turn names the review item it is testing, and formats stay varied", 
     expect(formats.filter((f) => f === format).length).toBeLessThanOrEqual(2);
   }
 
-  await finishSession(sessionId);
+  await finishSession(sessionId, { deps: tutor });
 });
 
 test("finishing reschedules only the items actually asked", async () => {
@@ -209,19 +215,35 @@ test("finishing reschedules only the items actually asked", async () => {
   expect(after.length).toBeGreaterThan(changed.size);
 });
 
+test("finishing writes a debrief onto the session", async () => {
+  const sessionId = await startDailySession();
+  const tutor = stubTutor([]);
+  await playThrough(sessionId, tutor);
+
+  const result = await finishSession(sessionId, { deps: tutor });
+  expect(result.debrief?.focusNext).toMatch(/precursor/i);
+
+  const session = await db.query.sessions.findFirst({
+    where: eq(schema.sessions.id, sessionId),
+  });
+  expect((session!.debrief as { heldUp: string[] }).heldUp).toEqual(["Fibril structure"]);
+});
+
 test("a same-day session and a daily session on one date leave the worst rating", async () => {
   const lectureId = await seedLecture("Tubular disease", 1, "Renal");
   const objective = await db.query.learningObjectives.findFirst({
     where: eq(schema.learningObjectives.lectureId, lectureId),
   });
 
+  const sameDayTutor = stubTutor(["red", "green", "green"]);
   const sameDay = await startSameDaySession(lectureId);
-  await playThrough(sameDay, stubTutor(["red", "green", "green"]));
-  await finishSession(sameDay);
+  await playThrough(sameDay, sameDayTutor);
+  await finishSession(sameDay, { deps: sameDayTutor });
 
+  const dailyTutor = stubTutor(Array(10).fill("green"));
   const daily = await startDailySession();
-  await playThrough(daily, stubTutor(Array(10).fill("green")));
-  const dailyResult = await finishSession(daily);
+  await playThrough(daily, dailyTutor);
+  const dailyResult = await finishSession(daily, { deps: dailyTutor });
 
   // Precondition, not luck: the same-day session's red alone already makes
   // the cell below red, so without pinning this the test would stay green
