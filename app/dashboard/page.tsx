@@ -1,5 +1,6 @@
 import { asc } from "drizzle-orm";
 import Link from "next/link";
+import { SuspendToggle } from "@/app/components/SuspendToggle";
 import { db, schema } from "@/lib/db";
 import type { Rating } from "@/lib/db/schema";
 
@@ -72,7 +73,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="mt-6 flex flex-wrap gap-4 text-xs text-stone-600 dark:text-stone-400">
-        {(Object.keys(CELL_STYLE) as Rating[]).map((rating) => (
+        {(["green", "yellow", "red"] as Rating[]).map((rating) => (
           <span key={rating} className="flex items-center gap-1.5">
             <span
               className={`inline-block h-3 w-3 rounded-sm ${CELL_STYLE[rating]}`}
@@ -80,6 +81,10 @@ export default async function DashboardPage() {
             {CELL_LABEL[rating]}
           </span>
         ))}
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-3 w-3 rounded-sm bg-emerald-900" />
+          Suspended — marks the objective, not a day
+        </span>
       </div>
 
       <div className="mt-6 overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-800">
@@ -114,10 +119,28 @@ export default async function DashboardPage() {
                   scope="row"
                   className="sticky left-0 z-10 border-r border-stone-200 bg-inherit px-4 py-3 text-left font-normal dark:border-stone-800"
                 >
-                  <span className="block text-[10px] uppercase tracking-wide text-stone-400">
-                    {lectureTitleById.get(objective.lectureId)}
+                  <span className="flex items-baseline justify-between gap-3">
+                    <span className="block text-[10px] uppercase tracking-wide text-stone-400">
+                      {lectureTitleById.get(objective.lectureId)}
+                    </span>
+                    <SuspendToggle
+                      objectiveId={objective.id}
+                      suspended={objective.suspended}
+                    />
                   </span>
-                  {objective.text}
+                  <span
+                    className={
+                      objective.suspended ? "text-stone-400 dark:text-stone-600" : ""
+                    }
+                  >
+                    {objective.suspended && (
+                      <span
+                        title="Suspended — not quizzed until reactivated"
+                        className="mr-2 inline-block h-2.5 w-2.5 rounded-sm bg-emerald-900 align-middle"
+                      />
+                    )}
+                    {objective.text}
+                  </span>
                 </th>
                 {dates.map((date) => {
                   const rating = cellByKey.get(`${objective.id}:${date.id}`);
