@@ -43,6 +43,20 @@ test("an uncommitted lecture contributes no candidates", async () => {
 });
 
 test("a committed lecture contributes one candidate per review item, carrying its objective's colours", async () => {
+  // Push the objective ids past the review-item ids. Both are first-row
+  // autoincrements otherwise, so loId and reviewItemId would coincide and a
+  // swap between them would pass unnoticed.
+  const [filler] = await db
+    .insert(schema.lectures)
+    .values({ title: "Filler, never committed" })
+    .returning({ id: schema.lectures.id });
+
+  await db.insert(schema.learningObjectives).values([
+    { lectureId: filler.id, text: "Filler A", orderIndex: 0 },
+    { lectureId: filler.id, text: "Filler B", orderIndex: 1 },
+    { lectureId: filler.id, text: "Filler C", orderIndex: 2 },
+  ]);
+
   const [lecture] = await db
     .insert(schema.lectures)
     .values({ title: draft.title, block: "Renal", draftExtract: draft })
@@ -101,6 +115,13 @@ test("a committed lecture contributes one candidate per review item, carrying it
   const candidates = await dailyCandidates();
 
   expect(candidates).toHaveLength(1);
+
+  // The assertion below compares values, not which column produced them, so it
+  // can only catch a swapped mapping while these five stay pairwise distinct.
+  expect(
+    new Set([item!.id, objective!.id, lecture.id, 7, 2]).size,
+  ).toBe(5);
+
   expect(candidates[0]).toEqual({
     reviewItemId: item!.id,
     loId: objective!.id,
