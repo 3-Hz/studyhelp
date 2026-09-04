@@ -127,3 +127,29 @@ const SEVERITY: Rating[] = ["red", "yellow", "green", "suspended"];
 export function worstRating(ratings: Rating[]): Rating | undefined {
   return SEVERITY.find((rating) => ratings.includes(rating));
 }
+
+/**
+ * The rating that represents each objective across a set of turns.
+ *
+ * The worst one, per worstRating — and computed once, because the dashboard
+ * cell and the review-item schedule describe the same performance and must
+ * not be able to drift apart.
+ */
+export function worstByLo(
+  turns: { loId: number | null; rating: Rating | null }[],
+): Map<number, Rating> {
+  const byLo = new Map<number, Rating[]>();
+  for (const turn of turns) {
+    if (turn.rating === null || turn.loId === null) continue;
+    const ratings = byLo.get(turn.loId) ?? [];
+    ratings.push(turn.rating);
+    byLo.set(turn.loId, ratings);
+  }
+
+  const worst = new Map<number, Rating>();
+  for (const [loId, ratings] of byLo) {
+    const rating = worstRating(ratings);
+    if (rating) worst.set(loId, rating);
+  }
+  return worst;
+}

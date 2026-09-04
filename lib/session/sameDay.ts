@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import type { Rating } from "@/lib/db/schema";
-import { worstRating } from "@/lib/schedule";
+import { worstByLo } from "@/lib/schedule";
 import type { ConceptContext } from "@/lib/tutor";
 import type { SessionKind } from "./kind";
 import { planNextTurn, type GradedTurn } from "./plan";
@@ -123,20 +123,10 @@ export const sameDayKind: SessionKind<SameDayMaterial> = {
   itemOutcomes(attempts, material) {
     // Phase 2 tests objectives, not concepts, so every item under a tested
     // objective moves on that objective's worst rating for the sitting.
-    const ratingsByLo = new Map<number, Rating[]>();
-    for (const attempt of attempts) {
-      if (attempt.rating === null || attempt.loId === null) continue;
-      const list = ratingsByLo.get(attempt.loId) ?? [];
-      list.push(attempt.rating);
-      ratingsByLo.set(attempt.loId, list);
-    }
-
     const outcomes = new Map<number, Rating>();
-    for (const [loId, ratings] of ratingsByLo) {
-      const worst = worstRating(ratings);
-      if (!worst) continue;
+    for (const [loId, rating] of worstByLo(attempts)) {
       for (const itemId of material.itemIdsByLo.get(loId) ?? []) {
-        outcomes.set(itemId, worst);
+        outcomes.set(itemId, rating);
       }
     }
     return outcomes;

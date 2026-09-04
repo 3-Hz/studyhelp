@@ -1,7 +1,13 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import type { Rating } from "@/lib/db/schema";
-import { capRating, nextSchedule, todayIso, worstRating } from "@/lib/schedule";
+import {
+  capRating,
+  nextSchedule,
+  todayIso,
+  worstByLo,
+  worstRating,
+} from "@/lib/schedule";
 import {
   askQuestion,
   gradeAnswer,
@@ -241,22 +247,11 @@ export async function finishSession(
 
   const today = todayIso(now);
 
-  // Group the session's graded ratings by objective. A turn with no loId — the
-  // lecture summary — assessed the lecture, not an objective, so it earns no
-  // cell.
-  const ratingsByLo = new Map<number, Rating[]>();
-  for (const attempt of loaded.attempts) {
-    if (attempt.rating === null || attempt.loId === null) continue;
-    const list = ratingsByLo.get(attempt.loId) ?? [];
-    list.push(attempt.rating);
-    ratingsByLo.set(attempt.loId, list);
-  }
-
-  const ratingByLo: Record<number, Rating> = {};
-  for (const [loId, ratings] of ratingsByLo) {
-    const worst = worstRating(ratings);
-    if (worst) ratingByLo[loId] = worst;
-  }
+  // A turn with no loId — the lecture summary — assessed the lecture, not an
+  // objective, so it earns no cell.
+  const ratingByLo: Record<number, Rating> = Object.fromEntries(
+    worstByLo(loaded.attempts),
+  );
 
   const testedLoIds = Object.keys(ratingByLo).map(Number);
 

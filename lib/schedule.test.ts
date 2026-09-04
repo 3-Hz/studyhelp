@@ -7,6 +7,7 @@ import {
   nextInterval,
   nextSchedule,
   todayIso,
+  worstByLo,
   worstRating,
 } from "./schedule";
 
@@ -116,6 +117,31 @@ test("the worst rating of a session represents the day", () => {
 
 test("worstRating reports nothing for an untested objective", () => {
   expect(worstRating([])).toBeUndefined();
+});
+
+test("worstByLo ignores turns with no loId, the lecture-summary stage", () => {
+  const result = worstByLo([
+    { loId: null, rating: "red" },
+    { loId: 1, rating: "green" },
+  ]);
+  expect(result.get(1)).toBe("green");
+  expect(result.size).toBe(1);
+});
+
+test("worstByLo ignores an ungraded turn", () => {
+  const result = worstByLo([
+    { loId: 1, rating: null },
+    { loId: 1, rating: "yellow" },
+  ]);
+  expect(result.get(1)).toBe("yellow");
+});
+
+test("worstByLo takes an objective's worst rating across the sitting", () => {
+  const result = worstByLo([
+    { loId: 1, rating: "red" },
+    { loId: 1, rating: "green" },
+  ]);
+  expect(result.get(1)).toBe("red");
 });
 
 test("daysBetween counts whole calendar days in either direction", () => {
