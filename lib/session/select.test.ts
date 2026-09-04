@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 import {
   allowedFormats,
+  FORMAT_FAMILY,
   select,
   weakness,
+  type Bucket,
   type Candidate,
 } from "./select";
 
@@ -33,7 +35,7 @@ function many(count: number, overrides: (i: number) => Partial<Candidate> = () =
   );
 }
 
-test("weakness reads the whole colour history, not just the last rating", () => {
+test("weakness reads the last three colours, not just the last rating", () => {
   const fresh = candidate({ reviewItemId: 1, lastRating: "green", history: ["green"] });
   const scarred = candidate({
     reviewItemId: 2,
@@ -75,6 +77,12 @@ test("an underfilled bucket hands its slots on rather than shortening the sessio
   const plan = select(candidates, { today: TODAY });
   expect(plan).toHaveLength(10);
   expect(plan.filter((slot) => slot.bucket === "due")).toHaveLength(2);
+  // The two slots the due bucket could not fill carry to recent, which is why
+  // it holds six rather than its default two — a plain length-10 assertion
+  // would also pass if the carry logic were deleted and the generic "fill"
+  // bucket padded the session out instead.
+  expect(plan.filter((slot) => slot.bucket === "recent")).toHaveLength(6);
+  expect(plan.filter((slot) => slot.bucket === "fill")).toHaveLength(0);
 });
 
 test("no two slots share an objective while the pool allows it", () => {
@@ -127,16 +135,175 @@ test("cumulative slots land at positions five and ten and carry companions", () 
 });
 
 test("consecutive slots move between lectures where the pool allows", () => {
-  const candidates = many(12, (i) => ({ lectureId: (i % 4) + 1, loId: i + 1 }));
+  // Two candidates per lecture, arriving in clustered pairs (201, 201, 202,
+  // 202, ...): the pool's natural order does not alternate on its own, so
+  // this only passes if interleave() actually rearranges it.
+  const candidates = [
+    candidate({ reviewItemId: 1, lectureId: 101 }),
+    candidate({ reviewItemId: 2, lectureId: 102 }),
+    candidate({ reviewItemId: 3, lectureId: 201 }),
+    candidate({ reviewItemId: 4, lectureId: 201 }),
+    candidate({ reviewItemId: 5, lectureId: 202 }),
+    candidate({ reviewItemId: 6, lectureId: 202 }),
+    candidate({ reviewItemId: 7, lectureId: 203 }),
+    candidate({ reviewItemId: 8, lectureId: 203 }),
+    candidate({ reviewItemId: 9, lectureId: 204 }),
+    candidate({ reviewItemId: 10, lectureId: 204 }),
+  ];
   const plan = select(candidates, { today: TODAY });
 
   const lectureOf = (slot: { reviewItemId: number }) =>
     candidates.find((c) => c.reviewItemId === slot.reviewItemId)!.lectureId;
 
-  // Four lectures are available, so the opening run should touch all four
-  // rather than working through one lecture at a time. Slots 5 and 10 are
-  // cumulative and placed after this ordering pass, so they are not asserted.
-  expect(new Set(plan.slice(0, 4).map(lectureOf)).size).toBe(4);
+  // Cumulative slots (101, 102) are placed by position, not by interleave(),
+  // so only the rest of the running order is checked here.
+  const rest = plan.filter((slot) => slot.bucket !== "interleaved");
+  for (let i = 1; i < rest.length; i++) {
+    expect(lectureOf(rest[i])).not.toBe(lectureOf(rest[i - 1]));
+  }
+});
+
+test("the weak bucket surfaces items with a red-flagged history even when nothing is due", () => {
+  const due = many(4, () => ({
+    dueOn: "2026-08-01",
+    lectureCommittedOn: "2000-01-01",
+  }));
+  const weak = [
+    candidate({
+      reviewItemId: 5,
+      lectureId: 5,
+      dueOn: "2099-01-01",
+      lectureCommittedOn: "2000-01-01",
+      history: ["red", "red", "red"], // weakness 6
+    }),
+    candidate({
+      reviewItemId: 6,
+      lectureId: 6,
+      dueOn: "2099-01-01",
+      lectureCommittedOn: "2000-01-01",
+      lapses: 2, // weakness 4
+    }),
+    candidate({
+      reviewItemId: 7,
+      lectureId: 7,
+      dueOn: "2099-01-01",
+      lectureCommittedOn: "2000-01-01",
+      lastRating: "red", // weakness 3
+    }),
+  ];
+  const filler = many(5, (i) => ({
+    reviewItemId: i + 8,
+    lectureId: i + 8,
+    dueOn: "2099-01-01",
+    lectureCommittedOn: "2000-01-01",
+  }));
+
+  const plan = select([...due, ...weak, ...filler], { today: TODAY });
+  const weakSlots = plan.filter((slot) => slot.bucket === "weak");
+  // Highest weakness first: item 5 (6), then item 6 (4). Item 7 (3) misses
+  // the cut.
+  expect(weakSlots.map((slot) => slot.reviewItemId)).toEqual([5, 6]);
+});
+
+test("a single-lecture corpus still fills a full session via the relaxation tiers", () => {
+  // Ten objectives, one lecture. The per-lecture cap binds well before the
+  // session is full, so most slots can only come from relaxing that cap
+  // rather than the stricter no-repeat-objective tier.
+  const candidates = many(10, (i) => ({ lectureId: 1, loId: i + 1 }));
+  const plan = select(candidates, { today: TODAY });
+  expect(plan).toHaveLength(10);
+});
+
+test("the default mix is four due, two weak, two recent, two interleaved when the corpus supports it", () => {
+  const due = many(4, () => ({ dueOn: "2026-08-01" }));
+  const weak = many(2, (i) => ({
+    reviewItemId: i + 5,
+    lectureId: i + 5,
+    dueOn: "2099-01-01",
+    lastRating: "red", // weakness 3, ranks above the spare below
+  }));
+  const recent = many(2, (i) => ({
+    reviewItemId: i + 7,
+    lectureId: i + 7,
+    dueOn: "2099-01-01",
+    lectureCommittedOn: "2026-08-28",
+  }));
+  const filler = many(2, (i) => ({
+    reviewItemId: i + 9,
+    lectureId: i + 9,
+    dueOn: "2099-01-01",
+  }));
+  // A third, weaker weak-eligible candidate. The weak bucket must leave it on
+  // the table at quota 2 — its presence is what would catch a quota drifting
+  // to 3, which a fixture with exactly two weak candidates cannot.
+  const spareWeak = candidate({
+    reviewItemId: 11,
+    lectureId: 11,
+    dueOn: "2099-01-01",
+    lastRating: "yellow", // weakness 1
+  });
+
+  const plan = select(
+    [...due, ...weak, ...recent, ...filler, spareWeak],
+    { today: TODAY },
+  );
+
+  const tally: Record<Bucket, number> = {
+    due: 0,
+    weak: 0,
+    recent: 0,
+    interleaved: 0,
+    fill: 0,
+  };
+  for (const slot of plan) tally[slot.bucket]++;
+
+  // This is the headline mix from prompt.txt: a fixture rich enough that
+  // every bucket could overfill catches a quota silently drifting from
+  // 4/2/2/2, which a fixture leaving buckets starved cannot.
+  expect(tally).toEqual({ due: 4, weak: 2, recent: 2, interleaved: 2, fill: 0 });
+});
+
+test("adjacent slots avoid repeating kind where the pool allows, and a mechanism item carries the mechanism family", () => {
+  const kinds = [
+    "fact",
+    "fact",
+    "fact",
+    "fact",
+    "mechanism",
+    "fact",
+    "mechanism",
+    "application",
+    "fact",
+    "mechanism",
+  ] as const;
+  const candidates = many(10, (i) => ({ kind: kinds[i] }));
+
+  const plan = select(candidates, { today: TODAY });
+  const kindOf = (slot: { reviewItemId: number }) =>
+    candidates.find((c) => c.reviewItemId === slot.reviewItemId)!.kind;
+
+  // Cumulative slots always carry the synthesis family regardless of the
+  // underlying objective's kind, so only the rest of the order is checked.
+  const rest = plan.filter((slot) => slot.bucket !== "interleaved");
+  for (let i = 1; i < rest.length; i++) {
+    expect(kindOf(rest[i])).not.toBe(kindOf(rest[i - 1]));
+  }
+
+  const mechanismSlot = plan.find((slot) => slot.reviewItemId === 5)!;
+  expect(mechanismSlot.formatFamily).toEqual(FORMAT_FAMILY.mechanism);
+});
+
+test("the two cumulative slots reach for different companions", () => {
+  const due = many(4, () => ({ dueOn: "2026-08-01" }));
+  const rest = many(6, (i) => ({ reviewItemId: i + 5, lectureId: i + 5 }));
+
+  const plan = select([...due, ...rest], { today: TODAY });
+  const cumulative = plan.filter((slot) => slot.bucket === "interleaved");
+
+  expect(cumulative).toHaveLength(2);
+  expect(cumulative[0].companionItemIds).not.toEqual(
+    cumulative[1].companionItemIds,
+  );
 });
 
 test("a format used twice drops out of the allowed set", () => {

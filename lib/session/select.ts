@@ -77,10 +77,10 @@ const HISTORY_WEIGHT: Record<Rating, number> = {
 /**
  * How badly an item has been going.
  *
- * Reads the last three dashboard colours rather than only the latest rating,
- * per prompt.txt: "Review the full LO history, not only the latest color."
- * Three reds and then a green still scores 4 — one good day does not erase the
- * record.
+ * prompt.txt: "Review the full LO history, not only the latest color." This
+ * reads the last three dashboard colours, not the item's whole history — a
+ * bounded stand-in for that rule, not the rule itself. Three reds and then a
+ * green still scores 4 — one good day does not erase the record.
  */
 export function weakness(candidate: Candidate): number {
   const recent = candidate.history.slice(-3);
@@ -333,16 +333,24 @@ function order(picks: Pick[]): PlannedSlot[] {
     sequence[index] = spread[cursor++];
   }
 
+  // Spent across cumulative slots in order, so the second cumulative question
+  // doesn't reach for exactly the material the first one already used.
+  const spentCompanions = new Set<number>();
+
   return sequence
     .filter((pick): pick is Pick => pick !== undefined)
     .map((pick, index) => {
       const isCumulative = pick.bucket === "interleaved";
+      const companionItemIds = isCumulative
+        ? companionsFor(pick, picks, spentCompanions)
+        : [];
+      for (const id of companionItemIds) spentCompanions.add(id);
       return {
         slot: index + 1,
         bucket: pick.bucket,
         loId: pick.candidate.loId,
         reviewItemId: pick.candidate.reviewItemId,
-        companionItemIds: isCumulative ? companionsFor(pick, picks) : [],
+        companionItemIds,
         formatFamily: isCumulative
           ? CUMULATIVE_FAMILY
           : FORMAT_FAMILY[pick.candidate.kind],
@@ -378,14 +386,26 @@ function interleave(picks: Pick[]): Pick[] {
   return out;
 }
 
-/** Up to two concepts from other lectures, for a question that spans them. */
-function companionsFor(pick: Pick, picks: Pick[]): number[] {
-  return picks
-    .filter(
-      (other) =>
-        other.candidate.reviewItemId !== pick.candidate.reviewItemId &&
-        other.candidate.lectureId !== pick.candidate.lectureId,
-    )
-    .slice(0, 2)
-    .map((other) => other.candidate.reviewItemId);
+/**
+ * Up to two concepts from other lectures, for a question that spans them.
+ *
+ * Skips companions an earlier cumulative slot already spent, falling back to
+ * the full pool only if that exclusion would leave nothing — a shared
+ * companion beats a cumulative question with none.
+ */
+function companionsFor(
+  pick: Pick,
+  picks: Pick[],
+  spent: Set<number>,
+): number[] {
+  const eligible = picks.filter(
+    (other) =>
+      other.candidate.reviewItemId !== pick.candidate.reviewItemId &&
+      other.candidate.lectureId !== pick.candidate.lectureId,
+  );
+  const unspent = eligible.filter(
+    (other) => !spent.has(other.candidate.reviewItemId),
+  );
+  const pool = unspent.length > 0 ? unspent : eligible;
+  return pool.slice(0, 2).map((other) => other.candidate.reviewItemId);
 }
