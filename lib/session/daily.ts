@@ -54,10 +54,14 @@ export async function startDailySession(now: Date = new Date()): Promise<number>
 
 export const dailyKind: SessionKind<DailyMaterial> = {
   async loadMaterial(session) {
-    const plan = (session.plan ?? []) as PlannedSlot[];
-    if (plan.length === 0) {
+    // Array.isArray, not just a length check: a stored plan that is JSON but
+    // not an array (e.g. an object) would otherwise pass a bare `.length ===
+    // 0` guard with `undefined`, and fail two lines later with a bare
+    // TypeError instead of this message.
+    if (!Array.isArray(session.plan) || session.plan.length === 0) {
       throw new Error("This daily session has no plan.");
     }
+    const plan = session.plan as PlannedSlot[];
 
     const wanted = new Set<number>();
     for (const slot of plan) {
@@ -128,7 +132,27 @@ export const dailyKind: SessionKind<DailyMaterial> = {
   },
 
   turnContext(turn, material) {
+    // Daily practice always targets one review item under one objective —
+    // unlike the same-day flavour, there is no whole-lecture stage with a
+    // legitimately absent objective. A turn that can't resolve one, or an
+    // objective whose lecture title is missing, means loadMaterial and
+    // planNext have drifted out of sync; that is a bug to surface, not a
+    // blank to paper over with "" (which the runner turns into a silent
+    // `null` title for the UI) or an invented lecture name reaching the
+    // model's prompt as if it were real.
     const objective = turn.loId === null ? undefined : material.objectiveById.get(turn.loId);
+    if (!objective) {
+      throw new Error(`Daily turn has no matching objective for loId ${turn.loId}.`);
+    }
+
+    const lectureTitleFor = (objective: ObjectiveRow): string => {
+      const title = material.lectureTitleById.get(objective.lectureId);
+      if (!title) {
+        throw new Error(`No lecture title found for lecture ${objective.lectureId}.`);
+      }
+      return title;
+    };
+
     const item = turn.reviewItemId === null ? undefined : material.itemById.get(turn.reviewItemId);
     const slot = material.plan.find((s) => s.reviewItemId === turn.reviewItemId);
 
@@ -139,7 +163,7 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       ...(lectureTitle ? { lectureTitle } : {}),
     });
 
-    const siblings = (objective ? material.siblingsByLo.get(objective.id) ?? [] : []).filter(
+    const siblings = (material.siblingsByLo.get(objective.id) ?? []).filter(
       (row) => row.id !== item?.id,
     );
 
@@ -148,18 +172,16 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       .filter((row): row is ReviewItemRow => row !== undefined)
       .map((row) => {
         const owner = material.objectiveById.get(row.loId);
-        const title = owner ? material.lectureTitleById.get(owner.lectureId) : undefined;
-        return flatten(row, title ?? "another lecture");
+        if (!owner) {
+          throw new Error(`Companion review item ${row.id} has no matching objective.`);
+        }
+        return flatten(row, lectureTitleFor(owner));
       });
-
-    const lectureTitle = objective
-      ? (material.lectureTitleById.get(objective.lectureId) ?? "")
-      : "";
 
     return {
       stage: "daily",
-      lectureTitle,
-      objective: objective?.text,
+      lectureTitle: lectureTitleFor(objective),
+      objective: objective.text,
       targetConcept: item?.concept,
       concepts: [
         ...(item ? [flatten(item)] : []),

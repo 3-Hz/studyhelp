@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 const TEST_DB = `./.test-daily-${process.pid}.db`;
 process.env.DATABASE_URL = TEST_DB;
@@ -11,6 +11,7 @@ const { todayIso } = await import("../schedule");
 const { startDailySession } = await import("./daily");
 const { startSameDaySession } = await import("./sameDay");
 const { currentTurn, finishSession, submitAnswer } = await import("./runner");
+const { FORMAT_FAMILY } = await import("./select");
 const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
 
 type TutorDeps = Parameters<typeof currentTurn>[1];
@@ -33,10 +34,18 @@ function draftFor(title: string, objectives: number) {
       // per objective (ties broken by lowest id), so if every objective's
       // first concept were the same kind, that one format family would
       // absorb most of the session and blow past its cap of two per format.
-      // Rotating by objective instead spreads picks across families, each
-      // with headroom under FORMAT_FAMILY's cap of three. A real corpus
-      // concentrated in one kind would still exhaust a family and trip the
-      // documented "a repeat beats no question" fallback in allowedFormats.
+      // Rotating by objective spreads picks across families, but does not
+      // give the fact family headroom: four objectives rotate to fact across
+      // the two lectures, and both "fill" slots (select()'s fallback for a
+      // corpus smaller than SESSION_SIZE) land on Amyloidosis objective 1,
+      // also fact — six fact-kind slots against a budget of exactly six
+      // (FORMAT_FAMILY.fact's 3 formats x 2 uses each). Zero slack, not
+      // headroom. The test below asserts that budget directly, so a fixture
+      // that outgrows it fails on the budget line instead of on a
+      // distribution assertion that would implicate the wrong code. A real
+      // corpus concentrated in one kind would still exhaust a family and
+      // trip the documented "a repeat beats no question" fallback in
+      // allowedFormats.
       kind: KINDS[Math.floor(i / 3) % 3],
       provenance: "taught" as const,
       relatedObjectiveIndexes: [Math.floor(i / 3)],
@@ -121,6 +130,25 @@ test("a daily session plans ten slots across both lectures", async () => {
 
 test("every turn names the review item it is testing, and formats stay varied", async () => {
   const sessionId = await startDailySession();
+
+  // Precondition, not luck: the fact family has 3 formats capped at 2 uses
+  // each (allowedFormats), a budget of 6. Fail here, with a clear message,
+  // if the fixture ever supplies more fact-kind slots than that — rather
+  // than in the distribution assertions below, where the failure would look
+  // like a bug in allowedFormats instead of a fixture that outgrew its
+  // budget.
+  const session = await db.query.sessions.findFirst({
+    where: eq(schema.sessions.id, sessionId),
+  });
+  const plannedItemIds = (session!.plan as { reviewItemId: number }[]).map(
+    (slot) => slot.reviewItemId,
+  );
+  const plannedItems = await db.query.reviewItems.findMany({
+    where: inArray(schema.reviewItems.id, plannedItemIds),
+  });
+  const factSlots = plannedItems.filter((item) => item.kind === "fact").length;
+  expect(factSlots).toBeLessThanOrEqual(FORMAT_FAMILY.fact.length * 2);
+
   const tutor = stubTutor([]);
   await playThrough(sessionId, tutor);
 
@@ -193,7 +221,12 @@ test("a same-day session and a daily session on one date leave the worst rating"
 
   const daily = await startDailySession();
   await playThrough(daily, stubTutor(Array(10).fill("green")));
-  await finishSession(daily);
+  const dailyResult = await finishSession(daily);
+
+  // Precondition, not luck: the same-day session's red alone already makes
+  // the cell below red, so without pinning this the test would stay green
+  // even if the daily session stopped picking the Tubular objective at all.
+  expect(dailyResult.ratingByLo[objective!.id]).toBeDefined();
 
   const studyDate = await db.query.studyDates.findFirst({
     where: eq(schema.studyDates.date, todayIso()),
