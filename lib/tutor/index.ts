@@ -7,6 +7,7 @@ import {
   HINTED_NOTE,
   HintOutput,
   QuestionOutput,
+  questionSchemaFor,
   TUTOR_SYSTEM,
   type QuestionFormat,
 } from "./schema";
@@ -18,6 +19,8 @@ export interface ConceptContext {
   concept: string;
   kind: string;
   provenance: string;
+  /** Set only for concepts pulled in from another lecture. */
+  lectureTitle?: string;
 }
 
 export interface TurnContext {
@@ -26,6 +29,8 @@ export interface TurnContext {
   /** The objective under test. Absent for the whole-lecture summary stage. */
   objective?: string;
   concepts: ConceptContext[];
+  /** Which concept this turn is about. Daily practice targets exactly one. */
+  targetConcept?: string;
   /** Formats already used this session, so the next question varies. */
   usedFormats?: QuestionFormat[];
   /** The formats this turn may use. Enforced through the output schema. */
@@ -45,7 +50,10 @@ export interface TutorOptions {
 function conceptLines(concepts: ConceptContext[]): string {
   if (concepts.length === 0) return "(no concepts were extracted for this objective)";
   return concepts
-    .map((c) => `- [${c.kind}, ${c.provenance}] ${c.concept}`)
+    .map((c) => {
+      const source = c.lectureTitle ? `, from ${c.lectureTitle}` : "";
+      return `- [${c.kind}, ${c.provenance}${source}] ${c.concept}`;
+    })
     .join("\n");
 }
 
@@ -72,6 +80,7 @@ export async function askQuestion(
     "",
     `Lecture: ${context.lectureTitle}`,
     context.objective ? `Objective: ${context.objective}` : "",
+    context.targetConcept ? `Target concept: ${context.targetConcept}` : "",
     "",
     "Concepts available to build from:",
     conceptLines(context.concepts),
@@ -83,7 +92,7 @@ export async function askQuestion(
   const { value } = await generateStructured({
     profile,
     model: options.model,
-    schema: QuestionOutput,
+    schema: questionSchemaFor(context.allowedFormats),
     schemaName: "question",
     system: TUTOR_SYSTEM,
     messages: [{ role: "user", content: prompt }],

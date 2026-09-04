@@ -41,6 +41,21 @@ export const QuestionOutput = z.object({
 export type QuestionOutput = z.infer<typeof QuestionOutput>;
 
 /**
+ * The question contract for one slot.
+ *
+ * Narrowing the enum is how format variety is enforced — prompt.txt's "Do not
+ * ask 10 questions in the same format" is a rule about the session, not a
+ * judgement about the question, so the model gets no say in it. Validation and
+ * repair are already handled by generateStructured.
+ */
+export function questionSchemaFor(allowed?: QuestionFormat[]) {
+  if (!allowed || allowed.length === 0) return QuestionOutput;
+  return QuestionOutput.extend({
+    format: z.enum(allowed as [QuestionFormat, ...QuestionFormat[]]),
+  });
+}
+
+/**
  * The grading contract.
  *
  * "suspended" is absent by design: dark green is the student's decision to stop

@@ -53,7 +53,10 @@ type AnyKind = SessionKind<any>;
 
 async function kindFor(session: SessionRow): Promise<AnyKind> {
   if (session.type === "daily") {
-    throw new Error("Daily sessions are not implemented yet.");
+    // Imported lazily: daily.ts pulls in selection, which nothing needs while
+    // a same-day session is running.
+    const { dailyKind } = await import("./daily");
+    return dailyKind;
   }
   return sameDayKind;
 }
