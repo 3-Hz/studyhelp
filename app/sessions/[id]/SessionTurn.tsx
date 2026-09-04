@@ -59,10 +59,11 @@ async function post<T>(url: string, body: unknown): Promise<T> {
 
 export default function SessionTurn({
   sessionId,
-  heading,
+  sessionType,
 }: {
   sessionId: number;
-  heading: string;
+  /** Drives copy that must not be fooled by a lecture literally titled "Daily practice". */
+  sessionType: "same_day" | "daily";
 }) {
   const [turn, setTurn] = useState<Turn | null>(null);
   const [done, setDone] = useState(false);
@@ -72,7 +73,11 @@ export default function SessionTurn({
   const [busy, setBusy] = useState<null | "loading" | "grading" | "hinting" | "finishing">("loading");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<
-    { cellsWritten: number; debrief: DebriefOutput | null } | null
+    {
+      cellsWritten: number;
+      debrief: DebriefOutput | null;
+      ratingByLo: Record<number, Rating>;
+    } | null
   >(null);
 
   // Two effect passes in development would otherwise fire two turn requests.
@@ -148,6 +153,7 @@ export default function SessionTurn({
       const finished = await post<{
         cellsWritten: number;
         debrief: DebriefOutput | null;
+        ratingByLo: Record<number, Rating>;
       }>(`/api/sessions/${sessionId}/finish`, {});
       setResult(finished);
     } catch (caught) {
@@ -169,6 +175,7 @@ export default function SessionTurn({
           {result.cellsWritten} dashboard cell
           {result.cellsWritten === 1 ? "" : "s"} written for today.
         </p>
+        <ColorTally ratingByLo={result.ratingByLo} />
         {result.debrief && <Debrief debrief={result.debrief} />}
         <Link href="/dashboard" className="mt-6 inline-block text-sm underline">
           Back to the dashboard
@@ -181,11 +188,16 @@ export default function SessionTurn({
     return (
       <div className="mt-8">
         <h2 className="text-lg font-medium">
-          {heading === "Daily practice" ? "That is today's ten." : "That is the whole lecture."}
+          {sessionType === "daily" ? "That is today's ten." : "That is the whole lecture."}
         </h2>
         <p className="mt-2 max-w-xl text-sm text-stone-600 dark:text-stone-400">
           Finishing records one dashboard cell per objective — the worst rating
-          it earned today — and schedules everything beneath it for review.
+          it earned today
+          {sessionType === "daily"
+            ? // Daily moves only the concept asked, one review item at a time —
+              // the point of the concept-level ladder (see daily.test.ts).
+              "."
+            : " — and schedules everything beneath it for review."}
         </p>
         {error && <ErrorNote message={error} />}
         <button
@@ -288,6 +300,34 @@ export default function SessionTurn({
       )}
 
       {feedback && <FeedbackPanel feedback={feedback} onContinue={loadTurn} />}
+    </div>
+  );
+}
+
+/** How many objectives landed on each colour today — the design doc's promised tally. */
+function ColorTally({ ratingByLo }: { ratingByLo: Record<number, Rating> }) {
+  const ratings = Object.values(ratingByLo);
+  if (ratings.length === 0) return null;
+
+  const counts = (["green", "yellow", "red"] as const).map((rating) => ({
+    rating,
+    count: ratings.filter((r) => r === rating).length,
+  }));
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {counts.map(
+        ({ rating, count }) =>
+          count > 0 && (
+            <span
+              key={rating}
+              title={RATING_LABEL[rating]}
+              className={`rounded px-2 py-0.5 text-xs font-medium ${RATING_STYLE[rating]}`}
+            >
+              {count} {rating}
+            </span>
+          ),
+      )}
     </div>
   );
 }

@@ -82,7 +82,7 @@ export default async function DashboardPage() {
           </span>
         ))}
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-3 w-3 rounded-sm bg-emerald-900" />
+          <span className={`inline-block h-3 w-3 rounded-sm ${CELL_STYLE.suspended}`} />
           Suspended — marks the objective, not a day
         </span>
       </div>
@@ -136,7 +136,7 @@ export default async function DashboardPage() {
                     {objective.suspended && (
                       <span
                         title="Suspended — not quizzed until reactivated"
-                        className="mr-2 inline-block h-2.5 w-2.5 rounded-sm bg-emerald-900 align-middle"
+                        className={`mr-2 inline-block h-2.5 w-2.5 rounded-sm ${CELL_STYLE.suspended} align-middle`}
                       />
                     )}
                     {objective.text}

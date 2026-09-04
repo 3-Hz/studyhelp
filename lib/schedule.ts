@@ -30,6 +30,19 @@ export function todayIso(now: Date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * Midnight of the local calendar day, for bounding "did this session start
+ * today" queries.
+ *
+ * Local, not UTC, for the same reason todayIso is: a UTC-based midnight would
+ * file an evening session west of Greenwich under the wrong day, either
+ * rejoining a session that should count as yesterday's or refusing to rejoin
+ * one that should still count as today's.
+ */
+export function startOfToday(now: Date = new Date()): Date {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
 /** Calendar arithmetic on a YYYY-MM-DD string, done in UTC so DST cannot shift it. */
 export function addDays(isoDate: string, days: number): string {
   const at = new Date(`${isoDate}T00:00:00Z`);

@@ -206,10 +206,13 @@ not even then.
 ```
 app/
   api/lectures/             ingest + commit endpoints
+  api/objectives/           suspend/reactivate an objective
   api/sessions/             start, turn, answer, hint, finish
   dashboard/                the LO grid
-  lectures/new/             upload
+  import/                   upload
+  lectures/                 the lecture list
   lectures/[id]/review/     draft review before commit
+  practice/                 the daily-practice landing screen
   sessions/[id]/            the study session
 lib/
   db/schema.ts              Drizzle schema

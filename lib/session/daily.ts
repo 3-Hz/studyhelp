@@ -1,7 +1,7 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import type { Rating } from "@/lib/db/schema";
-import { todayIso } from "@/lib/schedule";
+import { startOfToday, todayIso } from "@/lib/schedule";
 import type { ConceptContext, QuestionFormat } from "@/lib/tutor";
 import type { SessionKind } from "./kind";
 import { dailyCandidates } from "./candidates";
@@ -28,11 +28,20 @@ export interface DailyMaterial {
 
 export async function startDailySession(now: Date = new Date()): Promise<number> {
   // Rejoin an unfinished session rather than starting a parallel one, so a
-  // closed tab does not split a sitting in two.
+  // closed tab does not split a sitting in two — but only one started today.
+  // A plan is a plan for the day it was chosen: yesterday's due dates are not
+  // today's, so an older open session is left orphaned rather than resumed.
+  // That costs a few dead rows, and buys the escape hatch that makes this fix
+  // work — a session that becomes unplayable (turnContext throws if a lecture
+  // is deleted while it's open) stops blocking every day after the one it
+  // wedged on. It is not stamped with endedAt either: that would mark a
+  // session finished that never was, and then miscount as "already finished
+  // today" on /practice.
   const open = await db.query.sessions.findFirst({
     where: and(
       eq(schema.sessions.type, "daily"),
       isNull(schema.sessions.endedAt),
+      gte(schema.sessions.startedAt, startOfToday(now)),
     ),
   });
   if (open) return open.id;
@@ -128,6 +137,7 @@ export const dailyKind: SessionKind<DailyMaterial> = {
         used,
         used[used.length - 1],
       ),
+      bucket: next.bucket,
     };
   },
 

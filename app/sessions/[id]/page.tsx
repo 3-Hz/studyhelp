@@ -51,7 +51,7 @@ export default async function SessionPage({
   return (
     <div className="max-w-2xl">
       <h1 className="text-2xl font-semibold tracking-tight">{heading}</h1>
-      <SessionTurn sessionId={sessionId} heading={heading} />
+      <SessionTurn sessionId={sessionId} sessionType={session.type} />
     </div>
   );
 }

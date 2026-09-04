@@ -1,23 +1,31 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, gte, isNull } from "drizzle-orm";
 import Link from "next/link";
 import { StartDailyButton } from "@/app/components/StartDailyButton";
 import { db, schema } from "@/lib/db";
-import { todayIso } from "@/lib/schedule";
+import { startOfToday, todayIso } from "@/lib/schedule";
 import { dailyCandidates } from "@/lib/session/candidates";
+import { isDue, isEligible, SESSION_SIZE } from "@/lib/session/select";
 
 export const dynamic = "force-dynamic";
 
 export default async function PracticePage() {
   const today = todayIso();
   const candidates = await dailyCandidates();
-  const eligible = candidates.filter((candidate) => !candidate.loSuspended);
+  const eligible = candidates.filter(isEligible);
 
-  const due = eligible.filter((candidate) => candidate.dueOn <= today);
+  const due = eligible.filter((candidate) => isDue(candidate, today));
   const objectives = new Set(eligible.map((candidate) => candidate.loId));
   const lectures = new Set(eligible.map((candidate) => candidate.lectureId));
 
+  // Bounded to today, so this matches exactly what startDailySession will
+  // rejoin — otherwise the button could offer "Resume today's session" for a
+  // session actually started days ago.
   const open = await db.query.sessions.findFirst({
-    where: and(eq(schema.sessions.type, "daily"), isNull(schema.sessions.endedAt)),
+    where: and(
+      eq(schema.sessions.type, "daily"),
+      isNull(schema.sessions.endedAt),
+      gte(schema.sessions.startedAt, startOfToday()),
+    ),
   });
 
   const finished = (
@@ -56,7 +64,7 @@ export default async function PracticePage() {
             {lectures.size} lecture{lectures.size === 1 ? "" : "s"}.
           </p>
 
-          {eligible.length < 10 && (
+          {eligible.length < SESSION_SIZE && (
             <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
               Only {eligible.length} concept{eligible.length === 1 ? "" : "s"}{" "}
               {eligible.length === 1 ? "exists" : "exist"} so far, so

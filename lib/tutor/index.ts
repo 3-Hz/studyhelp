@@ -2,6 +2,7 @@ import type { LanguageModel } from "ai";
 import type { SessionStage } from "@/lib/db/schema";
 import { profileFor, type ModelProfile } from "@/lib/llm/config";
 import { generateStructured } from "@/lib/llm/structured";
+import type { Bucket } from "@/lib/session/select";
 import {
   DebriefOutput,
   GradeOutput,
@@ -36,6 +37,11 @@ export interface TurnContext {
   usedFormats?: QuestionFormat[];
   /** The formats this turn may use. Enforced through the output schema. */
   allowedFormats?: QuestionFormat[];
+  /**
+   * Why select() chose this item for today's daily plan — due, weak, recent,
+   * interleaved, fill. Absent for same-day turns, which have no such notion.
+   */
+  bucket?: Bucket;
 }
 
 /**
@@ -66,6 +72,19 @@ const STAGE_BRIEF: Record<SessionStage, string> = {
   daily: `This is daily retrieval practice, mixing material from several lectures. Ask about the target concept named below and nothing else. The student has met this material before, so do not re-teach it — ask them to retrieve it. Where concepts from other lectures are listed, the question should make the student distinguish or connect them rather than recite either one.`,
 };
 
+/**
+ * Why select() put this item in today's plan, turned into a one-sentence
+ * steer on difficulty — never a rule the grading could be talked around,
+ * since selection itself stays in code (prompt.txt "Adaptive Difficulty").
+ * `interleaved` gets nothing here: the daily brief's cross-lecture framing
+ * above already covers it, and repeating it would just be noise.
+ */
+const BUCKET_HINT: Partial<Record<Bucket, string>> = {
+  due: "This item is owed for spaced review, so ask for the whole thing rather than a fragment.",
+  weak: "This has gone badly before, so ask a focused question and let the student reconstruct it in steps.",
+  recent: "This was taught recently, so a focused question is appropriate.",
+};
+
 export async function askQuestion(
   context: TurnContext,
   options: TutorOptions = {},
@@ -76,8 +95,14 @@ export async function askQuestion(
     ? `\nFormats already used this session, which you should avoid repeating: ${context.usedFormats.join(", ")}.`
     : "";
 
+  const bucketHint =
+    context.stage === "daily" && context.bucket
+      ? BUCKET_HINT[context.bucket]
+      : undefined;
+
   const prompt = [
     STAGE_BRIEF[context.stage],
+    bucketHint ?? "",
     "",
     `Lecture: ${context.lectureTitle}`,
     context.objective ? `Objective: ${context.objective}` : "",

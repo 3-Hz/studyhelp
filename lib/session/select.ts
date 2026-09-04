@@ -60,6 +60,23 @@ export const CUMULATIVE_FAMILY: QuestionFormat[] = [
   "discrimination",
 ];
 
+/**
+ * Whether an objective is in play at all. Suspended (dark green) means "do
+ * not quiz again unless I reactivate it" — exported so /practice's counts
+ * and select()'s pool share one definition instead of two that can drift.
+ */
+export function isEligible(candidate: Candidate): boolean {
+  return !candidate.loSuspended;
+}
+
+/**
+ * Whether a review item is owed today. Exported for the same reason as
+ * isEligible: /practice's "due today" count has to mean what select() means.
+ */
+export function isDue(candidate: Candidate, today: string): boolean {
+  return candidate.dueOn <= today;
+}
+
 const LAST_RATING_WEIGHT: Record<Rating, number> = {
   red: 3,
   yellow: 1,
@@ -104,9 +121,13 @@ function isWeak(candidate: Candidate): boolean {
  * The formats the model may pick from for one slot.
  *
  * Narrowed from the slot's family by what the session has already used: no
- * format twice in a row, none more than twice in a session. Falling back to
- * the whole family when narrowing empties it — a repeated format beats no
- * question at all.
+ * format twice in a row, none more than twice in a session. The two rules
+ * are not equally important — a repeat right after itself is far more
+ * visible to the student than a repeat somewhere in the last ten questions
+ * — so when narrowing by both would empty the set, only the twice-in-a-
+ * session cap is relaxed first, and the immediate-repeat rule survives as
+ * long as there is any format left to satisfy it. The whole family, repeat
+ * and all, is the last resort: a repeated format beats no question at all.
  */
 export function allowedFormats(
   family: QuestionFormat[],
@@ -121,7 +142,10 @@ export function allowedFormats(
   const narrowed = family.filter(
     (format) => (counts.get(format) ?? 0) < 2 && format !== previous,
   );
-  return narrowed.length > 0 ? narrowed : family;
+  if (narrowed.length > 0) return narrowed;
+
+  const notPrevious = family.filter((format) => format !== previous);
+  return notPrevious.length > 0 ? notPrevious : family;
 }
 
 type Comparator = (a: Candidate, b: Candidate) => number;
@@ -154,8 +178,7 @@ export function select(
   const { today } = opts;
   const size = opts.size ?? SESSION_SIZE;
 
-  // Dark green means do not quiz until reactivated.
-  const pool = candidates.filter((candidate) => !candidate.loSuspended);
+  const pool = candidates.filter(isEligible);
 
   const picks: Pick[] = [];
   const takenItems = new Set<number>();
@@ -240,7 +263,7 @@ export function select(
     {
       bucket: "due",
       quota: 4,
-      eligible: (c) => c.dueOn <= today,
+      eligible: (c) => isDue(c, today),
       compare: () => compose(highestFirst(overdueBy), highestFirst(weakness)),
     },
     {

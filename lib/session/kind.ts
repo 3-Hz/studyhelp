@@ -7,6 +7,7 @@ import type {
   giveHint,
   summariseSession,
 } from "@/lib/tutor";
+import type { Bucket } from "./select";
 
 export type SessionRow = typeof schema.sessions.$inferSelect;
 export type AttemptRow = typeof schema.attempts.$inferSelect;
@@ -29,6 +30,8 @@ export interface TurnRef {
 export interface PlannedTurn extends TurnRef {
   /** Formats the model may choose from. Omitted means any. */
   allowedFormats?: QuestionFormat[];
+  /** Why select() picked this slot for daily practice. Absent for same-day turns. */
+  bucket?: Bucket;
 }
 
 /**

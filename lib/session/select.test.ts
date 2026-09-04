@@ -337,8 +337,22 @@ test("the previous question's format is not offered again immediately", () => {
   expect(narrowed).toEqual(["pathway", "consequence"]);
 });
 
-test("narrowing to nothing falls back to the whole family rather than asking nothing", () => {
+test("exhausting the twice-per-session cap still keeps the just-used format out", () => {
+  // Every format in the family has already been used twice, so the strict
+  // narrowing (cap + no-immediate-repeat) is empty. The stronger rule — no
+  // format twice in a row — outranks the cap, so relaxing the cap still
+  // will not hand back "synthesis", the format just asked.
   const family = ["synthesis", "comparison", "discrimination"] as const;
   const used = [...family, ...family];
-  expect(allowedFormats([...family], [...used], "synthesis")).toEqual([...family]);
+  expect(allowedFormats([...family], [...used], "synthesis")).toEqual([
+    "comparison",
+    "discrimination",
+  ]);
+});
+
+test("only a single-format family falls back to repeating the previous format", () => {
+  // With nothing else in the family, even the no-immediate-repeat rule must
+  // give way — a repeated format beats no question at all.
+  const family = ["synthesis"] as const;
+  expect(allowedFormats([...family], [], "synthesis")).toEqual([...family]);
 });

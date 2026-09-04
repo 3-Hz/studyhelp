@@ -7,14 +7,17 @@ process.env.DATABASE_URL = TEST_DB;
 
 const { db, schema } = await import("../db");
 const { commitLecture } = await import("../commitLecture");
-const { todayIso } = await import("../schedule");
+const { addDays, todayIso } = await import("../schedule");
 const { startDailySession } = await import("./daily");
 const { startSameDaySession } = await import("./sameDay");
 const { currentTurn, finishSession, submitAnswer } = await import("./runner");
 const { FORMAT_FAMILY } = await import("./select");
 const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
 
-type TutorDeps = Parameters<typeof currentTurn>[1];
+// currentTurn's deps parameter has a default value, which makes it optional
+// in Parameters<> and so `| undefined` in a plain index — NonNullable strips
+// that back off, since every test here passes a real tutor.
+type TutorDeps = NonNullable<Parameters<typeof currentTurn>[1]>;
 type Rating = "green" | "yellow" | "red";
 
 const KINDS = ["fact", "mechanism", "application"] as const;
@@ -99,6 +102,22 @@ function stubTutor(ratings: Rating[]): TutorDeps {
   } as TutorDeps;
 }
 
+/** Wraps a tutor's askQuestion to record every context it was called with. */
+function recordingTutor(
+  base: TutorDeps,
+  contexts: { bucket?: string }[],
+): TutorDeps {
+  return {
+    askQuestion: async (context) => {
+      contexts.push({ bucket: context.bucket });
+      return base.askQuestion(context);
+    },
+    gradeAnswer: base.gradeAnswer,
+    giveHint: base.giveHint,
+    summariseSession: base.summariseSession,
+  };
+}
+
 async function playThrough(sessionId: number, tutor: TutorDeps) {
   for (let guard = 0; guard < 30; guard++) {
     const turn = await currentTurn(sessionId, tutor);
@@ -132,6 +151,26 @@ test("a daily session plans ten slots across both lectures", async () => {
   expect(plan.map((slot) => slot.slot)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
   await db.delete(schema.sessions).where(eq(schema.sessions.id, sessionId));
+});
+
+test("a daily session started yesterday is not rejoined today", async () => {
+  const staleId = await startDailySession();
+
+  // Backdate as if the session was opened yesterday and never finished —
+  // a lecture deleted mid-session, say, which makes turnContext throw and
+  // leaves "Try again" as the only button forever.
+  const yesterdayNoon = new Date(`${addDays(todayIso(), -1)}T12:00:00`);
+  await db
+    .update(schema.sessions)
+    .set({ startedAt: yesterdayNoon })
+    .where(eq(schema.sessions.id, staleId));
+
+  const freshId = await startDailySession();
+  expect(freshId).not.toBe(staleId);
+
+  await db
+    .delete(schema.sessions)
+    .where(inArray(schema.sessions.id, [staleId, freshId]));
 });
 
 test("every turn names the review item it is testing, and formats stay varied", async () => {
@@ -175,6 +214,21 @@ test("every turn names the review item it is testing, and formats stay varied", 
   }
 
   await finishSession(sessionId, { deps: tutor });
+});
+
+test("a due-bucket slot's context carries the bucket, so its brief can differ from a fresh item's", async () => {
+  const sessionId = await startDailySession();
+
+  const contexts: { bucket?: string }[] = [];
+  const tutor = recordingTutor(stubTutor([]), contexts);
+
+  await playThrough(sessionId, tutor);
+  await finishSession(sessionId, { deps: tutor });
+
+  // Every review item is freshly committed and so due today, which puts the
+  // "due" bucket's quota of four ahead of "weak" and "recent" in select()'s
+  // fill order — this is guaranteed by the fixture, not by luck.
+  expect(contexts.some((context) => context.bucket === "due")).toBe(true);
 });
 
 test("finishing reschedules only the items actually asked", async () => {
