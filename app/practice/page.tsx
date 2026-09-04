@@ -58,8 +58,10 @@ export default async function PracticePage() {
 
           {eligible.length < 10 && (
             <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-              Only {eligible.length} concepts exist so far, so today&rsquo;s
-              session will be that long rather than ten questions.
+              Only {eligible.length} concept{eligible.length === 1 ? "" : "s"}{" "}
+              {eligible.length === 1 ? "exists" : "exist"} so far, so
+              today&rsquo;s session will be that long rather than ten
+              questions.
             </p>
           )}
 
