@@ -337,12 +337,27 @@ export async function finishSession(
     const studyDateId = await studyDateFor(today);
 
     for (const loId of testedLoIds) {
+      // Merge with whatever is already in today's cell rather than replacing
+      // it. Two sessions can share a date — a same-day review and a daily
+      // session — and the cell has to describe the whole day.
+      const existing = await db.query.performances.findFirst({
+        where: and(
+          eq(schema.performances.loId, loId),
+          eq(schema.performances.studyDateId, studyDateId),
+        ),
+      });
+
+      const rating =
+        worstRating(
+          existing ? [existing.rating, ratingByLo[loId]] : [ratingByLo[loId]],
+        ) ?? ratingByLo[loId];
+
       await db
         .insert(schema.performances)
-        .values({ loId, studyDateId, rating: ratingByLo[loId] })
+        .values({ loId, studyDateId, rating })
         .onConflictDoUpdate({
           target: [schema.performances.loId, schema.performances.studyDateId],
-          set: { rating: ratingByLo[loId] },
+          set: { rating },
         });
     }
   }

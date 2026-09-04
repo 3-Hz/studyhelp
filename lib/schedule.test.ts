@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   addDays,
   capRating,
+  daysBetween,
   LADDER,
   nextInterval,
   nextSchedule,
@@ -115,4 +116,16 @@ test("the worst rating of a session represents the day", () => {
 
 test("worstRating reports nothing for an untested objective", () => {
   expect(worstRating([])).toBeUndefined();
+});
+
+test("daysBetween counts whole calendar days in either direction", () => {
+  expect(daysBetween("2026-09-01", "2026-09-04")).toBe(3);
+  expect(daysBetween("2026-09-04", "2026-09-01")).toBe(-3);
+  expect(daysBetween("2026-09-04", "2026-09-04")).toBe(0);
+});
+
+// US DST ends 2026-11-01. Local-time arithmetic would return 2.958… days here
+// and round to the wrong integer for anyone doing calendar maths on it.
+test("daysBetween is not disturbed by a daylight-saving boundary", () => {
+  expect(daysBetween("2026-10-31", "2026-11-03")).toBe(3);
 });

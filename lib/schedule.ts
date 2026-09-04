@@ -38,6 +38,19 @@ export function addDays(isoDate: string, days: number): string {
 }
 
 /**
+ * Whole days from one calendar date to another, negative when `to` is earlier.
+ *
+ * Parsed as UTC for the same reason addDays is: a daylight-saving boundary
+ * between the two dates would otherwise make the difference a fraction and
+ * round it to the wrong day.
+ */
+export function daysBetween(from: string, to: string): number {
+  const start = Date.parse(`${from}T00:00:00Z`);
+  const end = Date.parse(`${to}T00:00:00Z`);
+  return Math.round((end - start) / 86_400_000);
+}
+
+/**
  * Hinted recall is never independent mastery (prompt.txt Retrieval Rule 8), so
  * a hinted green becomes yellow.
  *

@@ -286,7 +286,7 @@ test("review items move on to the interval their objective earned", async () => 
   expect(redItem.lastRating).toBe("red");
 });
 
-test("studying twice in one day updates the cell rather than duplicating it", async () => {
+test("a second session the same day keeps the worst rating, not the latest", async () => {
   const lectureId = await seedCommittedLecture();
   const objectives = await objectivesOf(lectureId);
 
@@ -303,8 +303,11 @@ test("studying twice in one day updates the cell rather than duplicating it", as
     where: eq(schema.performances.loId, objectives[0].id),
   });
 
+  // Still one cell for the day, and still red: a green that follows a red is
+  // recall of the correction just given, whether or not a session boundary
+  // falls between them.
   expect(cells).toHaveLength(1);
-  expect(cells[0].rating).toBe("green");
+  expect(cells[0].rating).toBe("red");
 });
 
 test("a finished session cannot be finished again", async () => {
