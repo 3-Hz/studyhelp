@@ -183,8 +183,16 @@ the correction just given. Objectives never tested stay blank, and finishing
 schedules every concept beneath them on the 0 / 1 / 3 / 7 / 14 / 30 / 60 day
 ladder.
 
-Phase 3 (daily 10-question sessions interleaved across lectures) is planned but
-not built.
+**Phase 3 (daily 10-question sessions interleaved across lectures) is implemented.**
+
+Each day's ten questions come from every committed lecture's review items:
+four due for spaced review, two from recent material, two weak or previously
+missed, two interleaved or cumulative. Selection is a pure function over the
+candidate pool, so a plan is reproducible and explainable afterward. An
+objective can be suspended from the dashboard (dark green: "do not quiz again
+unless I reactivate it"). Suspension is a row state, not a dashboard cell — it
+drops the objective's concepts from the daily pool and from a same-day
+session's plan without claiming the objective was tested that day.
 
 ## Data
 
@@ -222,6 +230,11 @@ lib/
   commitLecture.ts          draft → dashboard rows + review items
   tutor/schema.ts           question, grade and hint contracts
   tutor/index.ts            asking, grading and cueing
-  session/plan.ts           the session's running order, as a pure function
-  session/sameDay.ts        the session; writes the day and reschedules
+  session/kind.ts           the shared session-kind interface
+  session/plan.ts           the same-day session's running order, as a pure function
+  session/sameDay.ts        the same-day session; writes the day and reschedules
+  session/candidates.ts     everything the daily session could ask about
+  session/select.ts         choosing the day's ten questions, as a pure function
+  session/daily.ts          the daily session; interleaved across every lecture
+  session/runner.ts         asking, grading, and advancing either session kind
 ```
