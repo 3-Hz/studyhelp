@@ -23,10 +23,17 @@ must "target the missing component". Three things are missing today:
   `correction`, stored in `attempts.feedback` and read back only for the
   debrief. The next question about that item is asked blind.
 
-Scoped in alongside: a badge on each daily turn saying why the question is
-shaped as it is, a code-owned record of what each session did to each item,
-and a read-only per-lecture concept view — the first surface that shows review
-items at all.
+Scoped in alongside: a badge on each daily turn saying why the question was
+shaped as it was, a code-owned record of what each session did to each item, a
+read-only per-lecture concept view — the first surface that shows review items
+at all — and a reflection turn closing every session.
+
+The reflection turn comes from reviewing the design against *Make It Stick*
+rather than against `prompt.txt`. The book treats reflection as retrieval the
+learner does; today the debrief is the model summarising the student, and the
+same-day session has no close at all. The badge is shown after grading for a
+related reason: a judgement of learning handed over before the attempt is the
+anchor the book's chapter on calibration wants removed.
 
 ## What already exists
 
@@ -43,6 +50,11 @@ items at all.
   by `reviewItemId` (daily) or `loId` (same-day). The history to carry forward
   is already stored; nothing reads it at ask time.
 - `BUCKET_HINT` in `lib/tutor/index.ts` — replaced, not extended.
+- `dailyKind.closeOut` builds a `DebriefRequest` from graded attempts and
+  calls `summariseSession`. Nothing in it is daily-specific; it moves to the
+  runner and runs for both kinds.
+- `SESSION_STAGES` is a type-level enum — no CHECK constraint in the
+  migrations — so a new stage needs no migration.
 
 ## Scheduler — `lib/schedule.ts`
 
@@ -189,7 +201,8 @@ there is no earlier attempt to carry.
 
 ### Badge
 
-`Turn` gains an optional `why`, present on daily turns only:
+`TurnFeedback` — the answer response — gains an optional `why`, present for
+daily turns only:
 
 ```ts
 why?: {
@@ -202,8 +215,15 @@ why?: {
 };
 ```
 
-Read from the slot and the live item row. `SessionTurn` renders one muted
-line under the stage label:
+Read from the slot and the live item row in `submitAnswer`. It rides on the
+feedback, not the question, on purpose: *mature · was on a 60-day interval*
+before the attempt is a judgement of learning handed to the student before
+they make their own, and *relearning · lapsed 2×* is the same anchor in the
+other direction. After grading, the same line explains why the question was
+shaped as it was, which is all it is for. Nothing about the item is shown
+before the answer — not even the bucket.
+
+`SessionTurn` renders it as one muted line at the top of the feedback:
 
 > Due for review · relearning · lapsed 2× · was on a 3-day interval · due
 > since Sep 1
@@ -243,6 +263,69 @@ objective it touched; listing thirty concepts there would be noise.
 The concept text is snapshotted in the JSON on purpose: it is the concept as
 asked, and the session page needs no join to render a finished session.
 
+## Reflection — `runner.ts`, `plan.ts`, `daily.ts`, `lib/tutor`
+
+Every session ends with one ungraded free-text turn before the debrief. It is
+the student's account of the sitting, produced by the student: the book's
+reflection, and the prompt's missing same-day close (key ideas, hardest point,
+corrected misconception, remaining uncertainty).
+
+### Stage
+
+`SESSION_STAGES` gains `reflection`. The attempt has `loId` and
+`reviewItemId` null, `format` `"reflection"`, and never a rating. `worstByLo`
+and both `itemOutcomes` already skip attempts with no objective and no
+rating, so it earns no cell and moves no item.
+
+### Planning
+
+Both kinds return the reflection turn once everything else is done and no
+reflection attempt exists yet, and `null` after that: `planNextTurn` after
+the last elaboration, `dailyKind.planNext` after the tenth item. The question
+is fixed text owned by code, one per kind, so the turn costs no model call:
+
+- Same-day: *Without looking back: what were the key ideas of this lecture,
+  what was the hardest point, what misconception did you correct today, and
+  what are you still unsure of?*
+- Daily: *Before the summary: what was the hardest question today, what did
+  you get wrong and what is the correction you would give yourself, and what
+  are you still unsure of?*
+
+`currentTurn` inserts it like any other attempt, skipping `askQuestion` when
+the planned stage is `reflection`.
+
+### Answering
+
+`submitAnswer` on a reflection turn stores `studentAnswer` and returns
+`null`: no grade, no feedback, no badge. The runner's notion of a pending
+attempt changes from `rating === null` to `studentAnswer === null`. For graded
+stages the two are equivalent — `submitAnswer` sets both in one update — and
+for the reflection turn only the second is ever true. `requestHint` rejects a
+reflection turn; the UI hides the hint button for it.
+
+`dailyKind.progress` counts the reflection turn: `total` is `plan.length + 1`
+and the reflection turn is the last position.
+
+### Debrief
+
+`closeOut` leaves `SessionKind`. `finishSession` builds the `DebriefRequest`
+from the graded attempts — the code now in `dailyKind.closeOut` — adds
+`reflection: string | null` from the reflection attempt, and calls
+`summariseSession` for both kinds. The same-day session gets a debrief for
+the first time; the completion screen already renders one when present.
+
+`summariseSession` renders the reflection after the graded record as *The
+student's own account of the session*, and `DebriefOutput` gains
+`calibration: string` — where the student's account and the graded record
+disagree, in one sentence; empty when they agree or no reflection was given.
+The `Debrief` component shows it under `focusNext` when non-empty.
+
+### UI
+
+`SessionTurn` shows the reflection turn with the stage label *Reflection*, a
+textarea, no hint button, and no rating. Submitting advances straight to the
+completion state; there is no feedback screen between.
+
 ## Concept view — `lib/concepts.ts`, `app/lectures/[id]/concepts/page.tsx`
 
 ### Data
@@ -279,6 +362,9 @@ then edited to add the backfill, as `0003` was):
 - `review_items.streak integer not null default 0`
 - `sessions.outcomes text` — JSON, nullable
 
+The `reflection` stage is a TypeScript enum member only. `attempts.stage` has
+no CHECK constraint, so no migration.
+
 ### Backfill
 
 Existing items have climbed the ladder one rung per green from 0, so for an
@@ -301,13 +387,20 @@ history is not recoverable, and they cannot be mature yet in any case.
   single rating produces mature".
 - `select.test.ts` — slots carry the tier.
 - `tutor.test.ts` — the tier brief and the last-attempt block reach the
-  prompt; `BUCKET_HINT`'s old strings do not.
-- `daily.test.ts` — the turn carries `why`; two sessions on consecutive days,
-  the second's `askQuestion` receiving `lastAttempt` from the first; a
-  same-day session's misses reaching the item's first daily review through
-  the `loId` fallback; `finishSession` writing `outcomes` with the right
-  before and after tiers.
-- `sameDay.test.ts` — finish writes `streak` and `outcomes`.
+  prompt; `BUCKET_HINT`'s old strings do not; the reflection reaches the
+  debrief prompt and `calibration` comes back.
+- `plan.test.ts` — the reflection turn follows the last elaboration and
+  precedes `null`; a session with nothing to elaborate still gets one.
+- `daily.test.ts` — the feedback carries `why` and the turn does not; two
+  sessions on consecutive days, the second's `askQuestion` receiving
+  `lastAttempt` from the first; a same-day session's misses reaching the
+  item's first daily review through the `loId` fallback; the reflection turn
+  is the eleventh, `askQuestion` is not called for it, submitting it returns
+  `null`, and a hint on it is refused; `finishSession` writing `outcomes` with
+  the right before and after tiers and passing the reflection to
+  `summariseSession`.
+- `sameDay.test.ts` — the reflection turn closes the session; finish writes
+  `streak` and `outcomes`, and a debrief now exists.
 - `concepts.test.ts` — `lectureConcepts` shape, the sign of `dueIn`,
   suspended objectives still listed, an uncommitted lecture handled.
 - A migration test — applies the SQL files through `0004` directly, seeds
@@ -318,8 +411,11 @@ history is not recoverable, and they cannot be mature yet in any case.
 
 - Same-session revisit on red. The daily plan is frozen at start; Phase 3
   chose that deliberately, and reopening it buys little.
-- Confidence ratings and calibration. Still a widget on every turn and weeks
-  of data before it says anything.
+- Confidence ratings per turn. Still a widget on every question and weeks of
+  data before it says anything; the reflection turn is the first step toward
+  calibration without one.
+- Hiding the model answer after a green. It invites rereading, but it is a
+  UI change with no bookkeeping behind it; Phase 5.
 - Per-item suspension. The concept view is the surface it was waiting on;
   decide after using the view.
 - Tier-driven selection. `select.ts` keeps its own `weakness` and `isWeak`.
@@ -333,11 +429,16 @@ history is not recoverable, and they cannot be mature yet in any case.
 2. The migration with its backfill, and the migration test.
 3. `runner.finishSession` writes `streak` and `outcomes`; `SessionResult`
    gains `outcomes`. `sameDay.test.ts` and `daily.test.ts` green.
-4. `Candidate.streak`, `PlannedSlot.tier`, and the slot test.
-5. `TurnContext.tier`, `TIER_BRIEF` replacing `BUCKET_HINT`, the tutor test.
-6. `lastAttempt`: the two queries in `loadMaterial`, the prompt block, the
+4. The debrief hoisted into the runner for both kinds; `closeOut` removed
+   from `SessionKind`. `sameDay.test.ts` asserts a debrief.
+5. The reflection stage: the pending predicate, the fixed questions, both
+   `planNext`s, `submitAnswer` returning `null`, `requestHint` refusing,
+   `progress`, the reflection in the debrief prompt, `calibration`.
+6. `Candidate.streak`, `PlannedSlot.tier`, and the slot test.
+7. `TurnContext.tier`, `TIER_BRIEF` replacing `BUCKET_HINT`, the tutor test.
+8. `lastAttempt`: the two queries in `loadMaterial`, the prompt block, the
    two-session test and the `loId` fallback test.
-7. `Turn.why` and the badge; the outcomes lists on the daily completion
-   screen.
-8. `lib/concepts.ts` and its test; the page; the two links.
-9. README: the Status section and the layout listing.
+9. `TurnFeedback.why` and the badge; the reflection turn and `calibration`
+   in the UI; the outcomes lists on the daily completion screen.
+10. `lib/concepts.ts` and its test; the page; the two links.
+11. README: the Status section and the layout listing.
