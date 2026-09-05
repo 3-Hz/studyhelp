@@ -29,14 +29,17 @@ export type ReviewKind = (typeof REVIEW_KINDS)[number];
 
 /**
  * The same-day review runs lo_recall → summary → elaboration in order
- * (prompt.txt "Same-Day Retrieval Practice"). Daily practice has one stage:
- * its variety comes from the question format, not from a running order.
+ * (prompt.txt "Same-Day Retrieval Practice"). Daily practice has one graded
+ * stage: its variety comes from the question format, not from a running
+ * order. Both close with a reflection — the student's own account of the
+ * session, ungraded.
  */
 export const SESSION_STAGES = [
   "lo_recall",
   "summary",
   "elaboration",
   "daily",
+  "reflection",
 ] as const;
 export type SessionStage = (typeof SESSION_STAGES)[number];
 

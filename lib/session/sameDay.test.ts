@@ -181,8 +181,8 @@ test("taking a cue caps the rating at yellow even when the model says green", as
   expect(hint).toMatch(/precursor/i);
 
   const feedback = await submitAnswer(sessionId, "An answer.", tutor);
-  expect(feedback.modelRating).toBe("green");
-  expect(feedback.rating).toBe("yellow");
+  expect(feedback?.modelRating).toBe("green");
+  expect(feedback?.rating).toBe("yellow");
 });
 
 test("an objective that scored red earns an elaboration turn; a green one does not", async () => {
@@ -370,6 +370,42 @@ test("the summary turn contributes no dashboard cell", async () => {
   // green recall turns reach the dashboard.
   expect(result.cellsWritten).toBe(2);
   expect(Object.values(result.ratingByLo)).toEqual(["green", "green"]);
+});
+
+test("the session closes with an ungraded reflection turn", async () => {
+  const lectureId = await seedCommittedLecture();
+  const sessionId = await startSameDaySession(lectureId);
+  const tutor = stubTutor(["green", "green", "green"]);
+
+  // Two recalls and the summary, all green: nothing to elaborate.
+  for (let i = 0; i < 3; i++) {
+    await currentTurn(sessionId, tutor);
+    await submitAnswer(sessionId, "An answer.", tutor);
+  }
+
+  const reflection = await currentTurn(sessionId, tutor);
+  expect(reflection?.stage).toBe("reflection");
+  expect(reflection?.loId).toBeNull();
+  expect(reflection?.question).toMatch(/key ideas/i);
+
+  await expect(requestHint(sessionId, undefined, tutor)).rejects.toThrow(/no cue/i);
+
+  const feedback = await submitAnswer(sessionId, "The precursor was the hardest point.", tutor);
+  expect(feedback).toBeNull();
+  expect(await currentTurn(sessionId, tutor)).toBeNull();
+
+  const attempts = await db.query.attempts.findMany({
+    where: eq(schema.attempts.sessionId, sessionId),
+  });
+  const last = attempts[attempts.length - 1];
+  expect(last.stage).toBe("reflection");
+  expect(last.rating).toBeNull();
+  expect(last.studentAnswer).toMatch(/precursor/);
+
+  // No cell, no item moved, no question asked of the model for it.
+  const result = await finishSession(sessionId, { deps: tutor });
+  expect(result.cellsWritten).toBe(2);
+  expect(result.reviewItemsRescheduled).toBe(2);
 });
 
 test("a same-day session gets a debrief too", async () => {

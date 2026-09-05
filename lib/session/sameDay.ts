@@ -97,8 +97,9 @@ export const sameDayKind: SessionKind<SameDayMaterial> = {
         loId: attempt.loId,
         rating: attempt.rating as Rating,
       }));
+    const reflected = attempts.some((attempt) => attempt.stage === "reflection");
 
-    const plan = planNextTurn(material.objectives, graded);
+    const plan = planNextTurn(material.objectives, graded, { reflected });
     if (!plan) return null;
     return { stage: plan.stage, loId: plan.loId, reviewItemId: null };
   },

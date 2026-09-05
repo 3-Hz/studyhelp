@@ -207,6 +207,16 @@ test("the objective is omitted cleanly for the whole-lecture summary", async () 
   expect(prompts[0]).toMatch(/no concepts were extracted/);
 });
 
+test("the tutor refuses to compose the reflection, which is fixed text", async () => {
+  const model = new MockLanguageModelV4({
+    doGenerate: async () => textResult('{"format":"summary","question":"Never asked."}'),
+  });
+
+  await expect(
+    askQuestion({ stage: "reflection", lectureTitle: "Amyloidosis", concepts: [] }, { profile, model }),
+  ).rejects.toThrow(/fixed text/i);
+});
+
 test("QuestionOutput accepts an absent targetConcept", () => {
   const parsed = QuestionOutput.safeParse({
     format: "free_recall",

@@ -124,7 +124,11 @@ export const dailyKind: SessionKind<DailyMaterial> = {
     );
 
     const next = material.plan.find((slot) => !asked.has(slot.reviewItemId));
-    if (!next) return null;
+    if (!next) {
+      // Ten questions, then the student's own account of them.
+      if (attempts.some((attempt) => attempt.stage === "reflection")) return null;
+      return { stage: "reflection", loId: null, reviewItemId: null };
+    }
 
     const used = attempts.map((attempt) => attempt.format as QuestionFormat);
 
@@ -212,12 +216,10 @@ export const dailyKind: SessionKind<DailyMaterial> = {
   },
 
   progress(material, attempts) {
-    // Graded attempts only: the question in hand is the one being counted, not
-    // one already behind the student.
-    const answered = attempts.filter((attempt) => attempt.rating !== null).length;
-    return {
-      position: Math.min(answered + 1, material.plan.length),
-      total: material.plan.length,
-    };
+    // Answered turns only: the question in hand is the one being counted, not
+    // one already behind the student. The reflection is the last position.
+    const answered = attempts.filter((attempt) => attempt.studentAnswer !== null).length;
+    const total = material.plan.length + 1;
+    return { position: Math.min(answered + 1, total), total };
   },
 };

@@ -33,6 +33,19 @@ export type { TutorDeps } from "./kind";
 
 const REAL_TUTOR: TutorDeps = { askQuestion, gradeAnswer, giveHint, summariseSession };
 
+/**
+ * The reflection question, fixed and code-owned: prompt.txt's close-out asked
+ * as one turn, at no model cost.
+ */
+export const REFLECTION_QUESTION: Record<SessionRow["type"], string> = {
+  same_day:
+    "Without looking back: what were the key ideas of this lecture, what was the hardest point, what misconception did you correct today, and what are you still unsure of?",
+  daily:
+    "Before the summary: what was the hardest question today, what did you get wrong and what is the correction you would give yourself, and what are you still unsure of?",
+};
+
+const REFLECTION_FORMAT = "reflection";
+
 export interface Turn {
   attemptId: number;
   stage: AttemptRow["stage"];
@@ -88,14 +101,13 @@ function toTurn(
   attempt: AttemptRow,
   loaded: Loaded,
 ): Turn {
-  const context = loaded.kind.turnContext(
-    {
-      stage: attempt.stage,
-      loId: attempt.loId,
-      reviewItemId: attempt.reviewItemId,
-    },
-    loaded.material,
-  );
+  const context =
+    attempt.stage === "reflection"
+      ? null
+      : loaded.kind.turnContext(
+          { stage: attempt.stage, loId: attempt.loId, reviewItemId: attempt.reviewItemId },
+          loaded.material,
+        );
 
   const progress = loaded.kind.progress?.(loaded.material, loaded.attempts) ?? {
     position: loaded.attempts.filter((a) => a.rating !== null).length + 1,
@@ -106,8 +118,8 @@ function toTurn(
     attemptId: attempt.id,
     stage: attempt.stage,
     loId: attempt.loId,
-    objective: context.objective ?? null,
-    lectureTitle: context.lectureTitle || null,
+    objective: context?.objective ?? null,
+    lectureTitle: context?.lectureTitle || null,
     format: attempt.format,
     question: attempt.question,
     hintsUsed: attempt.hintsUsed,
@@ -129,11 +141,28 @@ export async function currentTurn(
 ): Promise<Turn | null> {
   const loaded = await load(sessionId);
 
-  const pending = loaded.attempts.find((attempt) => attempt.rating === null);
+  // Pending means unanswered, not ungraded: the reflection is answered and
+  // never graded, and for every other stage the two are set together.
+  const pending = loaded.attempts.find((attempt) => attempt.studentAnswer === null);
   if (pending) return toTurn(pending, loaded);
 
   const planned = loaded.kind.planNext(loaded.material, loaded.attempts);
   if (!planned) return null;
+
+  if (planned.stage === "reflection") {
+    const [created] = await db
+      .insert(schema.attempts)
+      .values({
+        sessionId,
+        stage: "reflection",
+        loId: null,
+        reviewItemId: null,
+        format: REFLECTION_FORMAT,
+        question: REFLECTION_QUESTION[loaded.session.type],
+      })
+      .returning();
+    return toTurn(created, { ...loaded, attempts: [...loaded.attempts, created] });
+  }
 
   const context = loaded.kind.turnContext(planned, loaded.material);
 
@@ -170,11 +199,21 @@ export async function submitAnswer(
   sessionId: number,
   answer: string,
   deps: TutorDeps = REAL_TUTOR,
-): Promise<TurnFeedback> {
+): Promise<TurnFeedback | null> {
   const loaded = await load(sessionId);
 
-  const pending = loaded.attempts.find((attempt) => attempt.rating === null);
+  const pending = loaded.attempts.find((attempt) => attempt.studentAnswer === null);
   if (!pending) throw new Error("There is no question waiting to be answered.");
+
+  // The reflection is the student's account of the session: stored, never
+  // graded, and the runner's only turn that ends with no feedback.
+  if (pending.stage === "reflection") {
+    await db
+      .update(schema.attempts)
+      .set({ studentAnswer: answer })
+      .where(eq(schema.attempts.id, pending.id));
+    return null;
+  }
 
   const context = loaded.kind.turnContext(pending, loaded.material);
 
@@ -206,8 +245,12 @@ export async function requestHint(
 ): Promise<string> {
   const loaded = await load(sessionId);
 
-  const pending = loaded.attempts.find((attempt) => attempt.rating === null);
+  const pending = loaded.attempts.find((attempt) => attempt.studentAnswer === null);
   if (!pending) throw new Error("There is no question waiting to be answered.");
+
+  if (pending.stage === "reflection") {
+    throw new Error("The reflection has no cue — it is your own account of the session.");
+  }
 
   const context = loaded.kind.turnContext(pending, loaded.material);
 

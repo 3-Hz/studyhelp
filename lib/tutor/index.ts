@@ -64,8 +64,11 @@ function conceptLines(concepts: ConceptContext[]): string {
     .join("\n");
 }
 
+/** The stages the tutor is asked to compose. The reflection is fixed text owned by the runner. */
+type AskableStage = Exclude<SessionStage, "reflection">;
+
 /** Per-stage instruction, kept out of the system block so that stays cacheable. */
-const STAGE_BRIEF: Record<SessionStage, string> = {
+const STAGE_BRIEF: Record<AskableStage, string> = {
   lo_recall: `This is LO recall. Ask the student to tell you everything they can about this one objective, before any answer is shown. Let them recite, outline, or work step by step.`,
   summary: `This is the lecture summary. Ask the student to summarise the whole lecture from memory, without notes. Do not name the objectives — recalling what the lecture covered is part of the task.`,
   elaboration: `This is elaboration and reflection. Ask why or how, compare similar concepts, predict the consequence of a mechanism failing, connect to earlier material, or have the student explain the idea to a classmate or patient. Go beyond restating the objective.`,
@@ -89,6 +92,10 @@ export async function askQuestion(
   context: TurnContext,
   options: TutorOptions = {},
 ): Promise<QuestionOutput> {
+  if (context.stage === "reflection") {
+    throw new Error("The reflection question is fixed text; the tutor never composes it.");
+  }
+
   const profile = options.profile ?? profileFor("tutor");
 
   const used = context.usedFormats?.length

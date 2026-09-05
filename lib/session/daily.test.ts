@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 
 const TEST_DB = `./.test-daily-${process.pid}.db`;
 process.env.DATABASE_URL = TEST_DB;
@@ -199,13 +199,18 @@ test("every turn names the review item it is testing, and formats stay varied", 
 
   const attempts = await db.query.attempts.findMany({
     where: eq(schema.attempts.sessionId, sessionId),
+    orderBy: [asc(schema.attempts.id)],
   });
 
-  expect(attempts).toHaveLength(10);
-  expect(attempts.every((attempt) => attempt.reviewItemId !== null)).toBe(true);
-  expect(attempts.every((attempt) => attempt.stage === "daily")).toBe(true);
+  const daily = attempts.filter((attempt) => attempt.stage === "daily");
+  expect(daily).toHaveLength(10);
+  expect(daily.every((attempt) => attempt.reviewItemId !== null)).toBe(true);
+  // The eleventh turn is the student's own account of the session.
+  expect(attempts).toHaveLength(11);
+  expect(attempts[10].stage).toBe("reflection");
+  expect(attempts[10].reviewItemId).toBeNull();
 
-  const formats = attempts.map((attempt) => attempt.format);
+  const formats = daily.map((attempt) => attempt.format);
   for (let index = 1; index < formats.length; index++) {
     expect(formats[index]).not.toBe(formats[index - 1]);
   }
@@ -213,6 +218,29 @@ test("every turn names the review item it is testing, and formats stay varied", 
     expect(formats.filter((f) => f === format).length).toBeLessThanOrEqual(2);
   }
 
+  await finishSession(sessionId, { deps: tutor });
+});
+
+test("the reflection turn is the eleventh and costs no question call", async () => {
+  const sessionId = await startDailySession();
+  const contexts: { bucket?: string }[] = [];
+  const tutor = recordingTutor(stubTutor([]), contexts);
+
+  for (let i = 0; i < 10; i++) {
+    const turn = await currentTurn(sessionId, tutor);
+    expect(turn?.stage).toBe("daily");
+    expect(turn?.total).toBe(11);
+    await submitAnswer(sessionId, "An answer.", tutor);
+  }
+
+  const reflection = await currentTurn(sessionId, tutor);
+  expect(reflection?.stage).toBe("reflection");
+  expect(reflection?.position).toBe(11);
+  expect(reflection?.question).toMatch(/hardest question/i);
+  expect(contexts).toHaveLength(10);
+
+  expect(await submitAnswer(sessionId, "I got the precursor wrong.", tutor)).toBeNull();
+  expect(await currentTurn(sessionId, tutor)).toBeNull();
   await finishSession(sessionId, { deps: tutor });
 });
 
