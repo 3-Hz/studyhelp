@@ -120,6 +120,15 @@ export const DebriefOutput = z.object({
   focusNext: z
     .string()
     .describe("The single most useful thing to work on next, in one sentence."),
+  calibration: z
+    .string()
+    .default("")
+    .describe(
+      "Where what the student told you about the session and the graded record " +
+        "disagree — something they think they know that the record says they " +
+        "missed, or the reverse — in one sentence. Empty when they agree, or " +
+        "when no account was given.",
+    ),
 });
 
 export type DebriefOutput = z.infer<typeof DebriefOutput>;

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { LanguageModelV4GenerateResult } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import type { ModelProfile } from "@/lib/llm/config";
-import { askQuestion, gradeAnswer, giveHint } from "./index";
+import { askQuestion, gradeAnswer, giveHint, summariseSession } from "./index";
 import { GradeOutput, QuestionOutput } from "./schema";
 
 /**
@@ -224,4 +224,49 @@ test("QuestionOutput accepts an absent targetConcept", () => {
   });
 
   expect(parsed.success).toBe(true);
+});
+
+test("the student's reflection reaches the debrief prompt and calibration comes back", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult(
+        '{"heldUp":["Fibril structure"],"shaky":[],"misconceptions":[],' +
+          '"focusNext":"Precursors.","calibration":"You felt sure of the precursor and missed it."}',
+      );
+    },
+  });
+
+  const debrief = await summariseSession(
+    {
+      answered: [{ question: "Name the precursor.", rating: "red", missing: ["The precursor"], incorrect: [] }],
+      reflection: "I think I have the precursors down.",
+    },
+    { profile, model },
+  );
+
+  expect(prompts[0]).toMatch(/own account/i);
+  expect(prompts[0]).toMatch(/precursors down/);
+  expect(debrief.calibration).toMatch(/felt sure/);
+});
+
+test("a debrief without a reflection asks for no calibration, and parses without one", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult(
+        '{"heldUp":[],"shaky":["Precursors"],"misconceptions":[],"focusNext":"Precursors."}',
+      );
+    },
+  });
+
+  const debrief = await summariseSession(
+    { answered: [{ question: "Q", rating: "yellow", missing: [], incorrect: [] }], reflection: null },
+    { profile, model },
+  );
+
+  expect(prompts[0]).not.toMatch(/own account/i);
+  expect(debrief.calibration).toBe("");
 });

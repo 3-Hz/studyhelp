@@ -98,6 +98,7 @@ function stubTutor(ratings: Rating[]): TutorDeps {
       shaky: ["AL versus ATTR"],
       misconceptions: [],
       focusNext: "Practise distinguishing the two precursor proteins.",
+      calibration: "",
     }),
   } as TutorDeps;
 }
@@ -356,4 +357,28 @@ test("a same-day session and a daily session on one date leave the worst rating"
   expect(studyDate).toBeDefined();
   expect(cells).toHaveLength(1);
   expect(cells[0].rating).toBe("red");
+});
+
+test("the reflection is handed to the debrief", async () => {
+  const sessionId = await startDailySession();
+  const base = stubTutor([]);
+  const requests: { reflection?: string | null }[] = [];
+  const tutor: TutorDeps = {
+    ...base,
+    summariseSession: async (request) => {
+      requests.push({ reflection: request.reflection });
+      return base.summariseSession(request);
+    },
+  };
+
+  for (let i = 0; i < 10; i++) {
+    await currentTurn(sessionId, tutor);
+    await submitAnswer(sessionId, "An answer.", tutor);
+  }
+  await currentTurn(sessionId, tutor);
+  await submitAnswer(sessionId, "Hardest: the precursor.", tutor);
+  await finishSession(sessionId, { deps: tutor });
+
+  expect(requests).toHaveLength(1);
+  expect(requests[0].reflection).toBe("Hardest: the precursor.");
 });

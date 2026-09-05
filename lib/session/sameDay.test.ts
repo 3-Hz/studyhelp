@@ -72,6 +72,7 @@ function stubTutor(ratings: Rating[]): TutorDeps {
       shaky: [],
       misconceptions: [],
       focusNext: "Practise the precursor proteins.",
+      calibration: "",
     }),
   } as TutorDeps;
 }

@@ -298,7 +298,9 @@ function debriefRequest(attempts: AttemptRow[]): DebriefRequest {
         incorrect: grade.incorrect ?? [],
       };
     });
-  return { answered };
+  const reflection =
+    attempts.find((attempt) => attempt.stage === "reflection")?.studentAnswer ?? null;
+  return { answered, reflection };
 }
 
 /**

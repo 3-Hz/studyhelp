@@ -230,6 +230,8 @@ export interface DebriefRequest {
     missing: string[];
     incorrect: string[];
   }[];
+  /** The student's own account of the session, from the reflection turn. */
+  reflection?: string | null;
 }
 
 /**
@@ -241,6 +243,8 @@ export async function summariseSession(
   options: TutorOptions = {},
 ): Promise<DebriefOutput> {
   const profile = options.profile ?? profileFor("tutor");
+
+  const reflection = request.reflection?.trim();
 
   const prompt = [
     "Summarise this retrieval session for the student.",
@@ -256,6 +260,17 @@ export async function summariseSession(
         .filter(Boolean)
         .join("\n"),
     ),
+    ...(reflection
+      ? [
+          "",
+          "The student's own account of the session, in their words:",
+          reflection,
+          "",
+          "Compare it with the graded record above. Where they disagree — something",
+          "the student believes they know that the record says they missed, or the",
+          "reverse — say so in one sentence as `calibration`. Leave it empty if they agree.",
+        ]
+      : []),
   ].join("\n");
 
   const { value } = await generateStructured({
