@@ -18,7 +18,7 @@ import {
   type DebriefRequest,
   type QuestionFormat,
 } from "@/lib/tutor";
-import type { AttemptRow, Outcome, SessionKind, SessionRow, TutorDeps } from "./kind";
+import type { AttemptRow, Outcome, SessionKind, SessionRow, TurnWhy, TutorDeps } from "./kind";
 import { sameDayKind } from "./sameDay";
 
 /**
@@ -194,6 +194,8 @@ export interface TurnFeedback {
   /** The model's rating before capRating. Differs only when a cue was taken. */
   modelRating: Rating;
   grade: Awaited<ReturnType<typeof gradeAnswer>>;
+  /** Why the turn was shaped as it was. Daily turns only. */
+  why?: TurnWhy;
 }
 
 export async function submitAnswer(
@@ -232,7 +234,12 @@ export async function submitAnswer(
     .set({ studentAnswer: answer, rating, feedback: JSON.stringify(grade) })
     .where(eq(schema.attempts.id, pending.id));
 
-  return { rating, modelRating: grade.rating, grade };
+  return {
+    rating,
+    modelRating: grade.rating,
+    grade,
+    why: loaded.kind.explain?.(pending, loaded.material),
+  };
 }
 
 /**

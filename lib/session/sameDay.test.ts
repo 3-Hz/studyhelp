@@ -184,6 +184,8 @@ test("taking a cue caps the rating at yellow even when the model says green", as
   const feedback = await submitAnswer(sessionId, "An answer.", tutor);
   expect(feedback?.modelRating).toBe("green");
   expect(feedback?.rating).toBe("yellow");
+  // Same-day turns have no selection story to tell.
+  expect(feedback?.why).toBeUndefined();
 });
 
 test("an objective that scored red earns an elaboration turn; a green one does not", async () => {

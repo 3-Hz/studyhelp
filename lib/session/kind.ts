@@ -49,6 +49,20 @@ export interface Outcome {
 }
 
 /**
+ * Why a daily turn was shaped as it was. Shown only after grading: a
+ * judgement of learning handed over before the attempt is the anchor the
+ * calibration literature wants removed.
+ */
+export interface TurnWhy {
+  bucket: Bucket;
+  tier: Tier;
+  lapses: number;
+  streak: number;
+  intervalDays: number;
+  dueOn: string;
+}
+
+/**
  * What differs between the two session flavours. The runner owns everything
  * else: resuming a pending question, capping a hinted rating, writing the day.
  *
@@ -69,4 +83,7 @@ export interface SessionKind<M> {
 
   /** Where the student is. Omitted when the length is not known in advance. */
   progress?(material: M, attempts: AttemptRow[]): { position: number; total: number | null };
+
+  /** The turn's selection story, for the badge. Omitted by kinds without one. */
+  explain?(turn: TurnRef, material: M): TurnWhy | undefined;
 }

@@ -400,3 +400,21 @@ test("every daily question carries the item's tier, and a red makes it relearnin
   // Ten reds make ten relearning items; the weak bucket alone surfaces two.
   expect(contexts.some((context) => context.tier === "relearning")).toBe(true);
 });
+
+test("the feedback explains the turn; the question does not", async () => {
+  const sessionId = await startDailySession();
+  const tutor = stubTutor([]);
+
+  const turn = await currentTurn(sessionId, tutor);
+  expect(turn).not.toHaveProperty("why");
+
+  const feedback = await submitAnswer(sessionId, "An answer.", tutor);
+  expect(feedback?.why).toBeDefined();
+  expect(["due", "weak", "recent", "interleaved", "fill"]).toContain(feedback!.why!.bucket);
+  expect(["new", "relearning", "consolidating", "mature"]).toContain(feedback!.why!.tier);
+  expect(feedback!.why!.dueOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(feedback!.why!.intervalDays).toBeGreaterThanOrEqual(0);
+
+  await playThrough(sessionId, tutor);
+  await finishSession(sessionId, { deps: tutor });
+});

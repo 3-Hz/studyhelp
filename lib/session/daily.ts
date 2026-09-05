@@ -1,7 +1,7 @@
 import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import type { Rating } from "@/lib/db/schema";
-import { startOfToday, todayIso } from "@/lib/schedule";
+import { startOfToday, tierOf, todayIso } from "@/lib/schedule";
 import type { ConceptContext, PriorAttempt, QuestionFormat } from "@/lib/tutor";
 import type { SessionKind } from "./kind";
 import { dailyCandidates } from "./candidates";
@@ -230,5 +230,21 @@ export const dailyKind: SessionKind<DailyMaterial> = {
     const answered = attempts.filter((attempt) => attempt.studentAnswer !== null).length;
     const total = material.plan.length + 1;
     return { position: Math.min(answered + 1, total), total };
+  },
+
+  explain(turn, material) {
+    if (turn.reviewItemId === null) return undefined;
+    const slot = material.plan.find((s) => s.reviewItemId === turn.reviewItemId);
+    const item = material.itemById.get(turn.reviewItemId);
+    if (!slot || !item) return undefined;
+    return {
+      bucket: slot.bucket,
+      // A plan frozen before tiers existed carries none; the row can say.
+      tier: slot.tier ?? tierOf(item),
+      lapses: item.lapses,
+      streak: item.streak,
+      intervalDays: item.intervalDays,
+      dueOn: item.dueOn,
+    };
   },
 };
