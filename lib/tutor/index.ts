@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai";
-import type { SessionStage } from "@/lib/db/schema";
+import type { Rating, SessionStage } from "@/lib/db/schema";
 import { profileFor, type ModelProfile } from "@/lib/llm/config";
 import { generateStructured } from "@/lib/llm/structured";
 import type { Tier } from "@/lib/schedule";
@@ -26,6 +26,18 @@ export interface ConceptContext {
   lectureTitle?: string;
 }
 
+/** The most recent graded attempt on a concept, from an earlier session. */
+export interface PriorAttempt {
+  daysAgo: number;
+  rating: Rating;
+  hintsUsed: boolean;
+  missing: string[];
+  incorrect: string[];
+  correction: string;
+  /** True when the attempt graded the whole objective, not this concept. */
+  aboutObjective: boolean;
+}
+
 export interface TurnContext {
   stage: SessionStage;
   lectureTitle: string;
@@ -45,6 +57,8 @@ export interface TurnContext {
   bucket?: Bucket;
   /** The item's mastery tier. Steers how demanding the question is. */
   tier?: Tier;
+  /** What happened last time this concept was tested, if it was. */
+  lastAttempt?: PriorAttempt;
 }
 
 /**
@@ -97,6 +111,32 @@ const TIER_BRIEF: Record<Tier, string> = {
     "The student has retrieved this reliably across increasing intervals. Test it through application or discrimination in a context the lecture did not use, combine it with the related concepts listed, and where plausible alternatives exist ask why the wrong ones are wrong.",
 };
 
+/**
+ * Last time, as the model needs it: what was missed, what was wrong, the
+ * correction given — and a steer that depends on tier. Relearning targets the
+ * gap (prompt.txt: "target the missing component"); anything more mature
+ * tests the same point by another route rather than repeating the wording.
+ */
+function lastAttemptLines(last: PriorAttempt, tier: Tier | undefined): string {
+  const when =
+    last.daysAgo === 0 ? "earlier today" : last.daysAgo === 1 ? "yesterday" : `${last.daysAgo} days ago`;
+  const about = last.aboutObjective ? "on the objective as a whole" : "on this concept";
+  const steer =
+    tier === "new" || tier === "relearning"
+      ? "Target what was missed."
+      : "Do not repeat that wording: test the same point through a different route.";
+
+  return [
+    `Last attempt, ${when}, ${about}: rated ${last.rating}${last.hintsUsed ? " after a cue" : ""}.`,
+    last.missing.length ? `  Missed: ${last.missing.join("; ")}` : "",
+    last.incorrect.length ? `  Wrong: ${last.incorrect.join("; ")}` : "",
+    last.correction ? `  Correction given: ${last.correction}` : "",
+    steer,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export async function askQuestion(
   context: TurnContext,
   options: TutorOptions = {},
@@ -112,10 +152,14 @@ export async function askQuestion(
     : "";
 
   const tierBrief = context.tier ? TIER_BRIEF[context.tier] : "";
+  const lastAttempt = context.lastAttempt
+    ? lastAttemptLines(context.lastAttempt, context.tier)
+    : "";
 
   const prompt = [
     STAGE_BRIEF[context.stage],
     tierBrief,
+    lastAttempt,
     "",
     `Lecture: ${context.lectureTitle}`,
     context.objective ? `Objective: ${context.objective}` : "",

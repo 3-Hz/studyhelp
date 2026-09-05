@@ -2,9 +2,10 @@ import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import type { Rating } from "@/lib/db/schema";
 import { startOfToday, todayIso } from "@/lib/schedule";
-import type { ConceptContext, QuestionFormat } from "@/lib/tutor";
+import type { ConceptContext, PriorAttempt, QuestionFormat } from "@/lib/tutor";
 import type { SessionKind } from "./kind";
 import { dailyCandidates } from "./candidates";
+import { priorAttempts } from "./prior";
 import { allowedFormats, select, type PlannedSlot } from "./select";
 
 /**
@@ -24,6 +25,7 @@ export interface DailyMaterial {
   objectiveById: Map<number, ObjectiveRow>;
   lectureTitleById: Map<number, string>;
   siblingsByLo: Map<number, ReviewItemRow[]>;
+  priorByItem: Map<number, PriorAttempt>;
 }
 
 export async function startDailySession(now: Date = new Date()): Promise<number> {
@@ -107,12 +109,15 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       siblingsByLo.set(item.loId, list);
     }
 
+    const priorByItem = await priorAttempts(session.id, plan);
+
     return {
       plan,
       itemById: new Map([...planned, ...siblings].map((item) => [item.id, item])),
       objectiveById: new Map(objectives.map((objective) => [objective.id, objective])),
       lectureTitleById: new Map(lectures.map((lecture) => [lecture.id, lecture.title])),
       siblingsByLo,
+      priorByItem,
     };
   },
 
@@ -198,6 +203,9 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       lectureTitle: lectureTitleFor(objective),
       objective: objective.text,
       targetConcept: item?.concept,
+      ...(item && material.priorByItem.has(item.id)
+        ? { lastAttempt: material.priorByItem.get(item.id) }
+        : {}),
       concepts: [
         ...(item ? [flatten(item)] : []),
         ...siblings.map((row) => flatten(row)),

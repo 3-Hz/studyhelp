@@ -305,3 +305,47 @@ test("the bucket no longer reaches the prompt", async () => {
   expect(prompts[0]).not.toMatch(/spaced review/i);
   expect(prompts[0]).not.toMatch(/gone badly/i);
 });
+
+test("the last attempt reaches the prompt, with a steer that depends on tier", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult('{"format":"mechanism","question":"Explain."}');
+    },
+  });
+  const lastAttempt = {
+    daysAgo: 3,
+    rating: "red" as const,
+    hintsUsed: false,
+    missing: ["Organ tropism"],
+    incorrect: ["Said ATTR comes from light chains"],
+    correction: "ATTR is transthyretin.",
+    aboutObjective: false,
+  };
+
+  await askQuestion(
+    { ...context, stage: "daily", tier: "relearning", lastAttempt },
+    { profile, model },
+  );
+  expect(prompts[0]).toMatch(/3 days ago/);
+  expect(prompts[0]).toMatch(/Organ tropism/);
+  expect(prompts[0]).toMatch(/light chains/);
+  expect(prompts[0]).toMatch(/transthyretin/);
+  expect(prompts[0]).toMatch(/target what was missed/i);
+
+  await askQuestion(
+    {
+      ...context,
+      stage: "daily",
+      tier: "mature",
+      lastAttempt: { ...lastAttempt, daysAgo: 1, rating: "green", hintsUsed: true, aboutObjective: true },
+    },
+    { profile, model },
+  );
+  expect(prompts[1]).toMatch(/yesterday/);
+  expect(prompts[1]).toMatch(/after a cue/);
+  expect(prompts[1]).toMatch(/objective as a whole/);
+  expect(prompts[1]).toMatch(/different route/i);
+  expect(prompts[1]).not.toMatch(/target what was missed/i);
+});
