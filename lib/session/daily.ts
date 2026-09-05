@@ -220,26 +220,4 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       total: material.plan.length,
     };
   },
-
-  async closeOut({ attempts, deps }) {
-    const answered = attempts
-      .filter((attempt) => attempt.rating !== null)
-      .map((attempt) => {
-        const grade = attempt.feedback
-          ? (JSON.parse(attempt.feedback) as {
-              missing?: string[];
-              incorrect?: string[];
-            })
-          : {};
-        return {
-          question: attempt.question,
-          rating: attempt.rating as string,
-          missing: grade.missing ?? [],
-          incorrect: grade.incorrect ?? [],
-        };
-      });
-
-    if (answered.length === 0) return null;
-    return deps.summariseSession({ answered });
-  },
 };

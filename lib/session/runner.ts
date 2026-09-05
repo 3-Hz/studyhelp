@@ -15,6 +15,7 @@ import {
   giveHint,
   summariseSession,
   type DebriefOutput,
+  type DebriefRequest,
   type QuestionFormat,
 } from "@/lib/tutor";
 import type { AttemptRow, Outcome, SessionKind, SessionRow, TutorDeps } from "./kind";
@@ -236,6 +237,28 @@ export interface SessionResult {
 }
 
 /**
+ * What the close-out summary sees: every graded turn with what it missed and
+ * got wrong. Kind-agnostic — a same-day session and a daily one are debriefed
+ * the same way.
+ */
+function debriefRequest(attempts: AttemptRow[]): DebriefRequest {
+  const answered = attempts
+    .filter((attempt) => attempt.rating !== null)
+    .map((attempt) => {
+      const grade = attempt.feedback
+        ? (JSON.parse(attempt.feedback) as { missing?: string[]; incorrect?: string[] })
+        : {};
+      return {
+        question: attempt.question,
+        rating: attempt.rating as string,
+        missing: grade.missing ?? [],
+        incorrect: grade.incorrect ?? [],
+      };
+    });
+  return { answered };
+}
+
+/**
  * Closes the session and writes the day: one dashboard cell per tested
  * objective, and a new due date for every review item the flavour says moved.
  */
@@ -325,15 +348,11 @@ export async function finishSession(
     });
   }
 
-  let debrief: unknown = null;
-  if (loaded.kind.closeOut) {
+  let debrief: DebriefOutput | null = null;
+  const request = debriefRequest(loaded.attempts);
+  if (request.answered.length > 0) {
     try {
-      debrief = await loaded.kind.closeOut({
-        session: loaded.session,
-        attempts: loaded.attempts,
-        material: loaded.material,
-        deps,
-      });
+      debrief = await deps.summariseSession(request);
     } catch (error) {
       // The cells and the schedule are the session's real output. A summary
       // that failed to generate is not worth losing them over.
@@ -350,7 +369,7 @@ export async function finishSession(
     cellsWritten: testedLoIds.length,
     reviewItemsRescheduled: outcomes.length,
     ratingByLo,
-    debrief: (debrief as DebriefOutput) ?? null,
+    debrief,
     outcomes,
   };
 }

@@ -67,14 +67,11 @@ function stubTutor(ratings: Rating[]): TutorDeps {
       modelAnswer: "A model answer.",
     }),
     giveHint: async () => ({ hint: "Think about the precursor protein." }),
-    // Unused at runtime: the same-day strategy has no closeOut, so this is
-    // never called. Present only so this object structurally satisfies
-    // TutorDeps, which every strategy's deps share.
     summariseSession: async () => ({
-      heldUp: [],
+      heldUp: ["Fibril structure"],
       shaky: [],
       misconceptions: [],
-      focusNext: "",
+      focusNext: "Practise the precursor proteins.",
     }),
   } as TutorDeps;
 }
@@ -213,7 +210,7 @@ test("the worst rating of the session represents the day", async () => {
   const tutor = stubTutor(["red", "green", "green", "green"]);
 
   await playThrough(sessionId, tutor);
-  const result = await finishSession(sessionId);
+  const result = await finishSession(sessionId, { deps: tutor });
 
   expect(result.ratingByLo[objectives[0].id]).toBe("red");
   expect(result.ratingByLo[objectives[1].id]).toBe("green");
@@ -225,7 +222,7 @@ test("finishing writes one dashboard cell per tested objective", async () => {
   const tutor = stubTutor(["green", "yellow", "green", "green"]);
 
   await playThrough(sessionId, tutor);
-  const result = await finishSession(sessionId);
+  const result = await finishSession(sessionId, { deps: tutor });
 
   expect(result.cellsWritten).toBe(2);
 
@@ -258,7 +255,7 @@ test("an objective that was never tested gets no cell at all", async () => {
   const tutor = stubTutor(["green", "green"]);
 
   await playThrough(sessionId, tutor);
-  const result = await finishSession(sessionId);
+  const result = await finishSession(sessionId, { deps: tutor });
 
   expect(result.cellsWritten).toBe(1);
 
@@ -276,7 +273,7 @@ test("review items move on to the interval their objective earned", async () => 
   const tutor = stubTutor(["green", "red", "green", "green"]);
 
   await playThrough(sessionId, tutor);
-  const result = await finishSession(sessionId);
+  const result = await finishSession(sessionId, { deps: tutor });
 
   expect(result.reviewItemsRescheduled).toBe(2);
 
@@ -320,13 +317,15 @@ test("a second session the same day keeps the worst rating, not the latest", asy
   const objectives = await objectivesOf(lectureId);
 
   const first = await startSameDaySession(lectureId);
-  await playThrough(first, stubTutor(["red", "red", "green", "green", "green"]));
-  await finishSession(first);
+  const firstTutor = stubTutor(["red", "red", "green", "green", "green"]);
+  await playThrough(first, firstTutor);
+  await finishSession(first, { deps: firstTutor });
 
   const second = await startSameDaySession(lectureId);
   expect(second).not.toBe(first);
-  await playThrough(second, stubTutor(["green", "green", "green"]));
-  await finishSession(second);
+  const secondTutor = stubTutor(["green", "green", "green"]);
+  await playThrough(second, secondTutor);
+  await finishSession(second, { deps: secondTutor });
 
   const cells = await db.query.performances.findMany({
     where: eq(schema.performances.loId, objectives[0].id),
@@ -345,9 +344,9 @@ test("a finished session cannot be finished again", async () => {
   const tutor = stubTutor(["green", "green", "green"]);
 
   await playThrough(sessionId, tutor);
-  await finishSession(sessionId);
+  await finishSession(sessionId, { deps: tutor });
 
-  await expect(finishSession(sessionId)).rejects.toThrow(/already been finished/i);
+  await expect(finishSession(sessionId, { deps: tutor })).rejects.toThrow(/already been finished/i);
 });
 
 test("answering when nothing was asked is an error, not a silent no-op", async () => {
@@ -365,10 +364,26 @@ test("the summary turn contributes no dashboard cell", async () => {
   const tutor = stubTutor(["green", "green", "red"]);
 
   await playThrough(sessionId, tutor);
-  const result = await finishSession(sessionId);
+  const result = await finishSession(sessionId, { deps: tutor });
 
   // The summary scored red, but it names no objective, so only the two
   // green recall turns reach the dashboard.
   expect(result.cellsWritten).toBe(2);
   expect(Object.values(result.ratingByLo)).toEqual(["green", "green"]);
+});
+
+test("a same-day session gets a debrief too", async () => {
+  const lectureId = await seedCommittedLecture();
+  const sessionId = await startSameDaySession(lectureId);
+  const tutor = stubTutor(["green", "green", "green"]);
+
+  await playThrough(sessionId, tutor);
+  const result = await finishSession(sessionId, { deps: tutor });
+
+  expect(result.debrief?.focusNext).toMatch(/precursor/i);
+
+  const session = await db.query.sessions.findFirst({
+    where: eq(schema.sessions.id, sessionId),
+  });
+  expect((session!.debrief as { heldUp: string[] }).heldUp).toEqual(["Fibril structure"]);
 });

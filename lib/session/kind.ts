@@ -67,12 +67,4 @@ export interface SessionKind<M> {
 
   /** Where the student is. Omitted when the length is not known in advance. */
   progress?(material: M, attempts: AttemptRow[]): { position: number; total: number | null };
-
-  /** Optional close-out. Whatever it returns is stored on sessions.debrief. */
-  closeOut?(args: {
-    session: SessionRow;
-    attempts: AttemptRow[];
-    material: M;
-    deps: TutorDeps;
-  }): Promise<unknown>;
 }
