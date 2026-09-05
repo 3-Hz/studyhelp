@@ -295,6 +295,24 @@ test("review items move on to the interval their objective earned", async () => 
   expect(redItem.lastRating).toBe("red");
   expect(greenItem.streak).toBe(1);
   expect(redItem.streak).toBe(0);
+
+  // What finishing did to each item, in the order the runner walked them.
+  expect(result.outcomes).toHaveLength(2);
+  const outcomeFor = (id: number) => result.outcomes.find((o) => o.reviewItemId === id);
+  expect(outcomeFor(greenItem.id)).toEqual({
+    reviewItemId: greenItem.id,
+    concept: greenItem.concept,
+    rating: "green",
+    tierBefore: "new",
+    tierAfter: "consolidating",
+    dueOn: greenItem.dueOn,
+  });
+  expect(outcomeFor(redItem.id)?.tierAfter).toBe("relearning");
+
+  const session = await db.query.sessions.findFirst({
+    where: eq(schema.sessions.id, sessionId),
+  });
+  expect(session!.outcomes).toEqual(result.outcomes);
 });
 
 test("a second session the same day keeps the worst rating, not the latest", async () => {

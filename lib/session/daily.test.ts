@@ -267,6 +267,20 @@ test("finishing reschedules only the items actually asked", async () => {
   // strictly advances — a moved item cannot land back on its previous state.
   expect(changed).toEqual(asked);
   expect(after.length).toBeGreaterThan(changed.size);
+
+  // One outcome per item asked, each moved off "new" or "relearning" by a
+  // green, and the same array on the session row.
+  expect(result.outcomes).toHaveLength(10);
+  expect(new Set(result.outcomes.map((o) => o.reviewItemId))).toEqual(asked);
+  for (const outcome of result.outcomes) {
+    expect(outcome.rating).toBe("green");
+    expect(["consolidating", "mature"]).toContain(outcome.tierAfter);
+    expect(outcome.concept.length).toBeGreaterThan(0);
+  }
+  const stored = await db.query.sessions.findFirst({
+    where: eq(schema.sessions.id, sessionId),
+  });
+  expect(stored!.outcomes).toEqual(result.outcomes);
 });
 
 test("finishing writes a debrief onto the session", async () => {

@@ -4,6 +4,7 @@ import type { Rating } from "@/lib/db/schema";
 import {
   capRating,
   nextSchedule,
+  tierOf,
   todayIso,
   worstByLo,
   worstRating,
@@ -16,7 +17,7 @@ import {
   type DebriefOutput,
   type QuestionFormat,
 } from "@/lib/tutor";
-import type { AttemptRow, SessionKind, SessionRow, TutorDeps } from "./kind";
+import type { AttemptRow, Outcome, SessionKind, SessionRow, TutorDeps } from "./kind";
 import { sameDayKind } from "./sameDay";
 
 /**
@@ -230,6 +231,8 @@ export interface SessionResult {
   ratingByLo: Record<number, Rating>;
   /** Null when the session has no close-out, or the summary call failed. */
   debrief: DebriefOutput | null;
+  /** One entry per review item that moved, in the order they were walked. */
+  outcomes: Outcome[];
 }
 
 /**
@@ -286,10 +289,10 @@ export async function finishSession(
     }
   }
 
-  const outcomes = loaded.kind.itemOutcomes(loaded.attempts, loaded.material);
-  let reviewItemsRescheduled = 0;
+  const moves = loaded.kind.itemOutcomes(loaded.attempts, loaded.material);
+  const outcomes: Outcome[] = [];
 
-  for (const [itemId, rating] of outcomes) {
+  for (const [itemId, rating] of moves) {
     const item = await db.query.reviewItems.findFirst({
       where: eq(schema.reviewItems.id, itemId),
     });
@@ -312,7 +315,14 @@ export async function finishSession(
       })
       .where(eq(schema.reviewItems.id, item.id));
 
-    reviewItemsRescheduled++;
+    outcomes.push({
+      reviewItemId: item.id,
+      concept: item.concept,
+      rating,
+      tierBefore: tierOf(item),
+      tierAfter: tierOf({ ...next, lastRating: rating }),
+      dueOn: next.dueOn,
+    });
   }
 
   let debrief: unknown = null;
@@ -333,14 +343,15 @@ export async function finishSession(
 
   await db
     .update(schema.sessions)
-    .set({ endedAt: now, ...(debrief ? { debrief } : {}) })
+    .set({ endedAt: now, outcomes, ...(debrief ? { debrief } : {}) })
     .where(eq(schema.sessions.id, sessionId));
 
   return {
     cellsWritten: testedLoIds.length,
-    reviewItemsRescheduled,
+    reviewItemsRescheduled: outcomes.length,
     ratingByLo,
     debrief: (debrief as DebriefOutput) ?? null,
+    outcomes,
   };
 }
 

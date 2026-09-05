@@ -1,5 +1,6 @@
 import type * as schema from "@/lib/db/schema";
 import type { Rating, SessionStage } from "@/lib/db/schema";
+import type { Tier } from "@/lib/schedule";
 import type { QuestionFormat, TurnContext } from "@/lib/tutor";
 import type {
   askQuestion,
@@ -32,6 +33,17 @@ export interface PlannedTurn extends TurnRef {
   allowedFormats?: QuestionFormat[];
   /** Why select() picked this slot for daily practice. Absent for same-day turns. */
   bucket?: Bucket;
+}
+
+/** What finishing did to one review item. Stored on sessions.outcomes. */
+export interface Outcome {
+  reviewItemId: number;
+  /** Snapshotted: the concept as it was asked, so a finished session needs no join. */
+  concept: string;
+  rating: Rating;
+  tierBefore: Tier;
+  tierAfter: Tier;
+  dueOn: string;
 }
 
 /**
