@@ -2,6 +2,7 @@ import type { LanguageModel } from "ai";
 import type { SessionStage } from "@/lib/db/schema";
 import { profileFor, type ModelProfile } from "@/lib/llm/config";
 import { generateStructured } from "@/lib/llm/structured";
+import type { Tier } from "@/lib/schedule";
 import type { Bucket } from "@/lib/session/select";
 import {
   DebriefOutput,
@@ -42,6 +43,8 @@ export interface TurnContext {
    * interleaved, fill. Absent for same-day turns, which have no such notion.
    */
   bucket?: Bucket;
+  /** The item's mastery tier. Steers how demanding the question is. */
+  tier?: Tier;
 }
 
 /**
@@ -75,17 +78,23 @@ const STAGE_BRIEF: Record<AskableStage, string> = {
   daily: `This is daily retrieval practice, mixing material from several lectures. Ask about the target concept named below and nothing else. The student has met this material before, so do not re-teach it — ask them to retrieve it. Where concepts from other lectures are listed, the question should make the student distinguish or connect them rather than recite either one.`,
 };
 
+/** A focused question, in steps: prompt.txt "Adaptive Difficulty" for new or weak material. */
+const FOCUSED_BRIEF =
+  "Ask a focused question about one part of this concept. Let the student work in steps. Do not combine it with other material.";
+
 /**
- * Why select() put this item in today's plan, turned into a one-sentence
- * steer on difficulty — never a rule the grading could be talked around,
- * since selection itself stays in code (prompt.txt "Adaptive Difficulty").
- * `interleaved` gets nothing here: the daily brief's cross-lecture framing
- * above already covers it, and repeating it would just be noise.
+ * How demanding the question should be, from the item's tier (prompt.txt
+ * "Adaptive Difficulty"). Kind decides the question's shape through the
+ * format family; tier decides its demand. Code sets the tier; the model
+ * shapes the question to it.
  */
-const BUCKET_HINT: Partial<Record<Bucket, string>> = {
-  due: "This item is owed for spaced review, so ask for the whole thing rather than a fragment.",
-  weak: "This has gone badly before, so ask a focused question and let the student reconstruct it in steps.",
-  recent: "This was taught recently, so a focused question is appropriate.",
+const TIER_BRIEF: Record<Tier, string> = {
+  new: FOCUSED_BRIEF,
+  relearning: `The student missed this last time. ${FOCUSED_BRIEF}`,
+  consolidating:
+    "The student has retrieved this before. Ask for the whole concept, unscaffolded; nothing in the wording should narrow it.",
+  mature:
+    "The student has retrieved this reliably across increasing intervals. Test it through application or discrimination in a context the lecture did not use, combine it with the related concepts listed, and where plausible alternatives exist ask why the wrong ones are wrong.",
 };
 
 export async function askQuestion(
@@ -102,14 +111,11 @@ export async function askQuestion(
     ? `\nFormats already used this session, which you should avoid repeating: ${context.usedFormats.join(", ")}.`
     : "";
 
-  const bucketHint =
-    context.stage === "daily" && context.bucket
-      ? BUCKET_HINT[context.bucket]
-      : undefined;
+  const tierBrief = context.tier ? TIER_BRIEF[context.tier] : "";
 
   const prompt = [
     STAGE_BRIEF[context.stage],
-    bucketHint ?? "",
+    tierBrief,
     "",
     `Lecture: ${context.lectureTitle}`,
     context.objective ? `Objective: ${context.objective}` : "",

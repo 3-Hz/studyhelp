@@ -142,6 +142,7 @@ export const dailyKind: SessionKind<DailyMaterial> = {
         used[used.length - 1],
       ),
       bucket: next.bucket,
+      tier: next.tier,
     };
   },
 

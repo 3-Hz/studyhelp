@@ -106,11 +106,11 @@ function stubTutor(ratings: Rating[]): TutorDeps {
 /** Wraps a tutor's askQuestion to record every context it was called with. */
 function recordingTutor(
   base: TutorDeps,
-  contexts: { bucket?: string }[],
+  contexts: { bucket?: string; tier?: string }[],
 ): TutorDeps {
   return {
     askQuestion: async (context) => {
-      contexts.push({ bucket: context.bucket });
+      contexts.push({ bucket: context.bucket, tier: context.tier });
       return base.askQuestion(context);
     },
     gradeAnswer: base.gradeAnswer,
@@ -381,4 +381,22 @@ test("the reflection is handed to the debrief", async () => {
 
   expect(requests).toHaveLength(1);
   expect(requests[0].reflection).toBe("Hardest: the precursor.");
+});
+
+test("every daily question carries the item's tier, and a red makes it relearning next time", async () => {
+  const first = await startDailySession();
+  const redTutor = stubTutor(Array(10).fill("red"));
+  await playThrough(first, redTutor);
+  await finishSession(first, { deps: redTutor });
+
+  const second = await startDailySession();
+  const contexts: { bucket?: string; tier?: string }[] = [];
+  const tutor = recordingTutor(stubTutor([]), contexts);
+  await playThrough(second, tutor);
+  await finishSession(second, { deps: tutor });
+
+  expect(contexts).toHaveLength(10);
+  expect(contexts.every((context) => context.tier !== undefined)).toBe(true);
+  // Ten reds make ten relearning items; the weak bucket alone surfaces two.
+  expect(contexts.some((context) => context.tier === "relearning")).toBe(true);
 });

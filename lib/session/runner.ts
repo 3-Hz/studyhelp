@@ -171,6 +171,7 @@ export async function currentTurn(
     usedFormats: loaded.attempts.map((a) => a.format as QuestionFormat),
     allowedFormats: planned.allowedFormats,
     bucket: planned.bucket,
+    tier: planned.tier,
   });
 
   const [created] = await db

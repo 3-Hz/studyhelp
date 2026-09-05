@@ -270,3 +270,38 @@ test("a debrief without a reflection asks for no calibration, and parses without
   expect(prompts[0]).not.toMatch(/own account/i);
   expect(debrief.calibration).toBe("");
 });
+
+test("the tier brief steers the question's demand", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult('{"format":"vignette","question":"A patient presents…"}');
+    },
+  });
+
+  await askQuestion({ ...context, stage: "daily", tier: "mature" }, { profile, model });
+  expect(prompts[0]).toMatch(/application or discrimination/i);
+  expect(prompts[0]).toMatch(/wrong ones are wrong/i);
+
+  await askQuestion({ ...context, stage: "daily", tier: "relearning" }, { profile, model });
+  expect(prompts[1]).toMatch(/one part of this concept/i);
+  expect(prompts[1]).not.toMatch(/application or discrimination/i);
+
+  await askQuestion({ ...context, stage: "daily", tier: "consolidating" }, { profile, model });
+  expect(prompts[2]).toMatch(/whole concept/i);
+});
+
+test("the bucket no longer reaches the prompt", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult('{"format":"free_recall","question":"Explain."}');
+    },
+  });
+
+  await askQuestion({ ...context, stage: "daily", bucket: "due" }, { profile, model });
+  expect(prompts[0]).not.toMatch(/spaced review/i);
+  expect(prompts[0]).not.toMatch(/gone badly/i);
+});

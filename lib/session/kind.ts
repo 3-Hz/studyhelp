@@ -33,6 +33,8 @@ export interface PlannedTurn extends TurnRef {
   allowedFormats?: QuestionFormat[];
   /** Why select() picked this slot for daily practice. Absent for same-day turns. */
   bucket?: Bucket;
+  /** The item's mastery tier, from the plan. Absent for same-day turns. */
+  tier?: Tier;
 }
 
 /** What finishing did to one review item. Stored on sessions.outcomes. */
