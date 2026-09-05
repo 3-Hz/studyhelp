@@ -120,9 +120,12 @@ export default async function DashboardPage() {
                   className="sticky left-0 z-10 border-r border-stone-200 bg-inherit px-4 py-3 text-left font-normal dark:border-stone-800"
                 >
                   <span className="flex items-baseline justify-between gap-3">
-                    <span className="block text-[10px] uppercase tracking-wide text-stone-400">
+                    <Link
+                      href={`/lectures/${objective.lectureId}/concepts`}
+                      className="block text-[10px] uppercase tracking-wide text-stone-400 hover:underline"
+                    >
                       {lectureTitleById.get(objective.lectureId)}
-                    </span>
+                    </Link>
                     <SuspendToggle
                       objectiveId={objective.id}
                       suspended={objective.suspended}
