@@ -155,6 +155,11 @@ test("daysAgo counts calendar days", async () => {
   expect(prior?.daysAgo).toBe(2);
 });
 
+// The expected ["In progress"] was planted two tests earlier, in "a direct
+// attempt on the item beats the objective's...", by the openId session's
+// graded red. "daysAgo counts calendar days" backdates that same attempt's
+// createdAt, but recency here is decided by id (see priorAttempts), not by
+// createdAt, so the backdating does not change which attempt is latest.
 test("the runner hands the last attempt to the tutor", async () => {
   const contexts: { lastAttempt?: { missing: string[]; aboutObjective: boolean } }[] = [];
   const base = stubTutor([]);

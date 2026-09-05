@@ -7,7 +7,7 @@ process.env.DATABASE_URL = TEST_DB;
 
 const { db, schema } = await import("../db");
 const { commitLecture } = await import("../commitLecture");
-const { addDays, todayIso } = await import("../schedule");
+const { addDays, todayIso, tierOf } = await import("../schedule");
 const { startDailySession } = await import("./daily");
 const { startSameDaySession } = await import("./sameDay");
 const { currentTurn, finishSession, submitAnswer } = await import("./runner");
@@ -398,7 +398,44 @@ test("every daily question carries the item's tier, and a red makes it relearnin
   expect(contexts).toHaveLength(10);
   expect(contexts.every((context) => context.tier !== undefined)).toBe(true);
   // Ten reds make ten relearning items; the weak bucket alone surfaces two.
+  // Residual weak state from earlier tests cannot crowd them out: the ten
+  // reds carry lapses >= 1 and lastRating red, so under weakness() they
+  // outrank any item that is weak only through objective history — and the
+  // assertion is `some`, not `every`.
   expect(contexts.some((context) => context.tier === "relearning")).toBe(true);
+});
+
+test("a plan frozen before tiers existed still explains its turns from the row", async () => {
+  // Plans written before Phase 4 carry no tier; explain() derives one from
+  // the item row instead of leaving the badge blank.
+  const item = await db.query.reviewItems.findFirst();
+  const objective = await db.query.learningObjectives.findFirst({
+    where: eq(schema.learningObjectives.id, item!.loId),
+  });
+  const [session] = await db
+    .insert(schema.sessions)
+    .values({
+      type: "daily",
+      plan: [
+        {
+          slot: 1,
+          bucket: "fill",
+          loId: objective!.id,
+          reviewItemId: item!.id,
+          companionItemIds: [],
+          formatFamily: FORMAT_FAMILY[item!.kind],
+        },
+      ],
+    })
+    .returning({ id: schema.sessions.id });
+
+  const tutor = stubTutor([]);
+  await currentTurn(session.id, tutor);
+  const feedback = await submitAnswer(session.id, "An answer.", tutor);
+
+  expect(feedback?.why?.tier).toBe(tierOf(item!));
+
+  await db.delete(schema.sessions).where(eq(schema.sessions.id, session.id));
 });
 
 test("the feedback explains the turn; the question does not", async () => {

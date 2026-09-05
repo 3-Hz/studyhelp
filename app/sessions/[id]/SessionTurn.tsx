@@ -334,7 +334,7 @@ export default function SessionTurn({
                   ? "Saving…"
                   : "Checking…"
                 : turn.stage === "reflection"
-                  ? "Save and finish"
+                  ? "Save and continue"
                   : "Submit answer"}
             </button>
 

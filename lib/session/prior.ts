@@ -14,6 +14,9 @@ type AttemptRow = typeof schema.attempts.$inferSelect;
  *
  * Read from `attempts` at load time rather than copied onto the item row:
  * one source of truth, nothing to keep in sync.
+ *
+ * Unfinished sessions count too: a miss is evidence whether or not the
+ * session that produced it ever wrote the day.
  */
 export async function priorAttempts(
   sessionId: number,
