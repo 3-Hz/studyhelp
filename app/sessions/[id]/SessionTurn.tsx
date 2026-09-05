@@ -3,12 +3,16 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Rating } from "@/lib/db/schema";
+import { todayIso } from "@/lib/schedule";
+import type { Outcome, TurnWhy } from "@/lib/session/kind";
+import type { Bucket } from "@/lib/session/select";
 import type { DebriefOutput, GradeOutput } from "@/lib/tutor/schema";
 import { Debrief } from "./Debrief";
+import { Outcomes } from "./Outcomes";
 
 interface Turn {
   attemptId: number;
-  stage: "lo_recall" | "summary" | "elaboration" | "daily";
+  stage: "lo_recall" | "summary" | "elaboration" | "daily" | "reflection";
   loId: number | null;
   objective: string | null;
   lectureTitle: string | null;
@@ -23,6 +27,7 @@ interface Feedback {
   rating: Rating;
   modelRating: Rating;
   grade: GradeOutput;
+  why?: TurnWhy;
 }
 
 const STAGE_LABEL: Record<Turn["stage"], string> = {
@@ -30,7 +35,40 @@ const STAGE_LABEL: Record<Turn["stage"], string> = {
   summary: "Lecture summary",
   elaboration: "Elaboration",
   daily: "Daily practice",
+  reflection: "Reflection",
 };
+
+const BUCKET_LABEL: Record<Bucket, string> = {
+  due: "Due for review",
+  recent: "Recent material",
+  weak: "Weak spot",
+  interleaved: "Cumulative",
+  fill: "Extra practice",
+};
+
+function monthDay(iso: string): string {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+/** One line: why this question was shaped as it was. Rendered after grading only. */
+function whyLine(why: TurnWhy): string {
+  const today = todayIso();
+  const parts = [BUCKET_LABEL[why.bucket], why.tier];
+  if (why.lapses > 0) parts.push(`lapsed ${why.lapses}×`);
+  if (why.streak > 0) parts.push(`${why.streak} green in a row`);
+  parts.push(why.intervalDays === 0 ? "first review" : `was on a ${why.intervalDays}-day interval`);
+  parts.push(
+    why.dueOn < today
+      ? `due since ${monthDay(why.dueOn)}`
+      : why.dueOn === today
+        ? "due today"
+        : "not yet due",
+  );
+  return parts.join(" · ");
+}
 
 const RATING_STYLE: Record<Rating, string> = {
   green: "bg-emerald-500 text-white",
@@ -77,6 +115,7 @@ export default function SessionTurn({
       cellsWritten: number;
       debrief: DebriefOutput | null;
       ratingByLo: Record<number, Rating>;
+      outcomes: Outcome[];
     } | null
   >(null);
 
@@ -118,9 +157,13 @@ export default function SessionTurn({
     setBusy("grading");
     setError(null);
     try {
-      const result = await post<Feedback>(`/api/sessions/${sessionId}/answer`, {
+      const result = await post<Feedback | null>(`/api/sessions/${sessionId}/answer`, {
         answer,
       });
+      if (result === null) {
+        await loadTurn();
+        return;
+      }
       setFeedback(result);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Grading failed.");
@@ -154,6 +197,7 @@ export default function SessionTurn({
         cellsWritten: number;
         debrief: DebriefOutput | null;
         ratingByLo: Record<number, Rating>;
+        outcomes: Outcome[];
       }>(`/api/sessions/${sessionId}/finish`, {});
       setResult(finished);
     } catch (caught) {
@@ -176,6 +220,7 @@ export default function SessionTurn({
           {result.cellsWritten === 1 ? "" : "s"} written for today.
         </p>
         <ColorTally ratingByLo={result.ratingByLo} />
+        {sessionType === "daily" && <Outcomes outcomes={result.outcomes} />}
         {result.debrief && <Debrief debrief={result.debrief} />}
         <Link href="/dashboard" className="mt-6 inline-block text-sm underline">
           Back to the dashboard
@@ -231,7 +276,8 @@ export default function SessionTurn({
     <div className="mt-8">
       <div className="flex items-baseline justify-between gap-4 text-xs text-stone-500">
         <span className="uppercase tracking-wide">
-          {STAGE_LABEL[turn.stage]} · {turn.format.replace(/_/g, " ")}
+          {STAGE_LABEL[turn.stage]}
+          {turn.stage !== "reflection" && ` · ${turn.format.replace(/_/g, " ")}`}
         </span>
         <span>
           {turn.total ? `${turn.position} of ${turn.total}` : `Question ${turn.position}`}
@@ -266,7 +312,11 @@ export default function SessionTurn({
             onChange={(event) => setAnswer(event.target.value)}
             rows={8}
             autoFocus
-            placeholder="Everything you can remember. Write it out before checking."
+            placeholder={
+              turn.stage === "reflection"
+                ? "In your own words. This is not graded."
+                : "Everything you can remember. Write it out before checking."
+            }
             className="mt-4 w-full resize-y rounded-md border border-stone-300 bg-white px-3 py-2 text-sm dark:border-stone-700 dark:bg-stone-900"
           />
 
@@ -279,23 +329,33 @@ export default function SessionTurn({
               disabled={busy !== null || answer.trim().length === 0}
               className="rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-stone-100 dark:text-stone-900"
             >
-              {busy === "grading" ? "Checking…" : "Submit answer"}
+              {busy === "grading"
+                ? turn.stage === "reflection"
+                  ? "Saving…"
+                  : "Checking…"
+                : turn.stage === "reflection"
+                  ? "Save and finish"
+                  : "Submit answer"}
             </button>
 
-            <button
-              type="button"
-              onClick={cue}
-              disabled={busy !== null || turn.hintsUsed}
-              className="text-sm text-stone-600 underline disabled:no-underline disabled:opacity-40 dark:text-stone-400"
-            >
-              {turn.hintsUsed ? "Cue taken" : "I need a cue"}
-            </button>
+            {turn.stage !== "reflection" && (
+              <button
+                type="button"
+                onClick={cue}
+                disabled={busy !== null || turn.hintsUsed}
+                className="text-sm text-stone-600 underline disabled:no-underline disabled:opacity-40 dark:text-stone-400"
+              >
+                {turn.hintsUsed ? "Cue taken" : "I need a cue"}
+              </button>
+            )}
           </div>
 
-          <p className="mt-2 text-xs text-stone-500">
-            A cue caps this answer at yellow — hinted recall is not independent
-            recall.
-          </p>
+          {turn.stage !== "reflection" && (
+            <p className="mt-2 text-xs text-stone-500">
+              A cue caps this answer at yellow — hinted recall is not independent
+              recall.
+            </p>
+          )}
         </>
       )}
 
@@ -343,6 +403,9 @@ function FeedbackPanel({
 
   return (
     <div className="mt-6 rounded-lg border border-stone-200 p-5 dark:border-stone-800">
+      {feedback.why && (
+        <p className="mb-3 text-xs text-stone-500">{whyLine(feedback.why)}</p>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <span
           className={`rounded px-2 py-0.5 text-xs font-medium ${RATING_STYLE[rating]}`}
