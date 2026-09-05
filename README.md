@@ -63,7 +63,7 @@ different models:
 | Role | Used for | Wants |
 |---|---|---|
 | `EXTRACT` | Reading lectures | Long context, native PDF and vision |
-| `TUTOR` | Quiz and grading loop (Phases 2–3) | Cheap and fast; short calls |
+| `TUTOR` | Quiz and grading loop (Phases 2–4) | Cheap and fast; short calls |
 
 Set `LLM_EXTRACT_PROVIDER` to `anthropic`, `openai`, `google`, or
 `openai-compatible` (aliases: `ollama`, `lmstudio`, `vllm`, `llamacpp`,
@@ -194,6 +194,19 @@ unless I reactivate it"). Suspension is a row state, not a dashboard cell — it
 drops the objective's concepts from the daily pool and from a same-day
 session's plan without claiming the objective was tested that day.
 
+**Phase 4 (history-aware scheduling and adaptive difficulty) is implemented.**
+
+The scheduler reads an item's history, not only its latest colour. An item
+that has ever lapsed climbs a ladder with twice the rungs; yellow halves the
+interval within a 1–3 day band; and every item carries a mastery tier — new,
+relearning, consolidating, mature — that takes three greens in a row and a
+fortnight's interval to reach. The tier steers how demanding the next
+question is, and each question also carries what was missed last time. Every
+session closes with an ungraded reflection turn — the student's own account,
+which the debrief compares with the graded record. Why a question was shaped
+as it was is shown after grading, never before; a read-only concept view
+under each lecture shows where every item stands.
+
 ## Data
 
 Everything is local: a SQLite file in the project root, gitignored along with
@@ -212,11 +225,12 @@ app/
   import/                   upload
   lectures/                 the lecture list
   lectures/[id]/review/     draft review before commit
+  lectures/[id]/concepts/   every review item under a lecture, and where it stands
   practice/                 the daily-practice landing screen
   sessions/[id]/            the study session
 lib/
   db/schema.ts              Drizzle schema
-  schedule.ts               the interval ladder, the hint cap, worst-of-day
+  schedule.ts               the ladders, the yellow band, the hint cap, worst-of-day, the tier
   eval/score.ts             scoring an extraction against the answer key
   fixtures/pptxBuilder.ts   minimal OOXML deck builder
   fixtures/syntheticLecture.ts  fabricated lecture + ground truth
@@ -234,6 +248,7 @@ lib/
   extract/chunk.ts          splitting a lecture to fit the context window
   extract/merge.ts          deterministic merge of chunked extractions
   commitLecture.ts          draft → dashboard rows + review items
+  concepts.ts               a lecture's objectives and review items, with tier and due state
   tutor/schema.ts           question, grade and hint contracts
   tutor/index.ts            asking, grading and cueing
   session/kind.ts           the shared session-kind interface
@@ -242,5 +257,6 @@ lib/
   session/candidates.ts     everything the daily session could ask about
   session/select.ts         choosing the day's ten questions, as a pure function
   session/daily.ts          the daily session; interleaved across every lecture
+  session/prior.ts          the last graded attempt on each planned item
   session/runner.ts         asking, grading, and advancing either session kind
 ```
