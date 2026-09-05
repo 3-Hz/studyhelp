@@ -296,7 +296,7 @@ export async function finishSession(
     if (!item) continue;
 
     const next = nextSchedule(
-      { intervalDays: item.intervalDays, lapses: item.lapses },
+      { intervalDays: item.intervalDays, lapses: item.lapses, streak: item.streak },
       rating,
       today,
     );
@@ -307,6 +307,7 @@ export async function finishSession(
         dueOn: next.dueOn,
         intervalDays: next.intervalDays,
         lapses: next.lapses,
+        streak: next.streak,
         lastRating: rating,
       })
       .where(eq(schema.reviewItems.id, item.id));

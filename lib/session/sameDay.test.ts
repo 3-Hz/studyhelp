@@ -293,6 +293,8 @@ test("review items move on to the interval their objective earned", async () => 
   expect(redItem.intervalDays).toBe(1);
   expect(redItem.lapses).toBe(1);
   expect(redItem.lastRating).toBe("red");
+  expect(greenItem.streak).toBe(1);
+  expect(redItem.streak).toBe(0);
 });
 
 test("a second session the same day keeps the worst rating, not the latest", async () => {

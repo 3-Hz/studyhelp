@@ -10,11 +10,24 @@ import type { Rating } from "@/lib/db/schema";
 /** The default successful-review sequence. Beyond the last rung, intervals double. */
 export const LADDER = [0, 1, 3, 7, 14, 30, 60] as const;
 
-/** Yellow returns in the 1–3 day band regardless of how far the item had got. */
-const YELLOW_INTERVAL = 1 + 1;
+/**
+ * The ladder for an item that has ever lapsed: the same span with twice the
+ * rungs. Recovery is slower, never punitive. Lapses are permanent, so an item
+ * that failed once climbs this ladder from then on — "review the full
+ * history, not only the latest colour", in the scheduler's own terms.
+ */
+export const LAPSED_LADDER = [0, 1, 2, 3, 5, 7, 10, 14, 21, 30, 45, 60] as const;
+
+/** Yellow returns within the prompt's 1–3 day band. */
+const YELLOW_MIN = 1;
+const YELLOW_MAX = 3;
 
 /** Red returns tomorrow, near the bottom of the ladder but not below it. */
 const RED_INTERVAL = 1;
+
+/** Mastery needs repeated retrieval across increasing intervals: three greens, two weeks. */
+const MATURE_STREAK = 3;
+const MATURE_INTERVAL = 14;
 
 /**
  * Today as a local calendar date.
@@ -76,20 +89,32 @@ export function capRating(rating: Rating, hintsUsed: boolean): Rating {
 }
 
 /** The next rung strictly above the current interval; doubling past the top. */
-export function nextInterval(intervalDays: number): number {
-  const rung = LADDER.find((days) => days > intervalDays);
+export function nextInterval(intervalDays: number, lapses = 0): number {
+  const ladder: readonly number[] = lapses > 0 ? LAPSED_LADDER : LADDER;
+  const rung = ladder.find((days) => days > intervalDays);
   return rung ?? intervalDays * 2;
+}
+
+/**
+ * Yellow halves the interval, held within 1–3 days: a mature item that was
+ * merely incomplete comes back in three days, a fragile one tomorrow.
+ */
+export function yellowInterval(intervalDays: number): number {
+  return Math.min(YELLOW_MAX, Math.max(YELLOW_MIN, Math.floor(intervalDays / 2)));
 }
 
 export interface ScheduleState {
   intervalDays: number;
   lapses: number;
+  /** Consecutive greens. */
+  streak: number;
 }
 
 export interface ScheduleResult {
   dueOn: string;
   intervalDays: number;
   lapses: number;
+  streak: number;
 }
 
 /**
@@ -110,21 +135,52 @@ export function nextSchedule(
       dueOn: addDays(today, state.intervalDays),
       intervalDays: state.intervalDays,
       lapses: state.lapses,
+      streak: state.streak,
     };
   }
 
   const intervalDays =
     rating === "green"
-      ? nextInterval(state.intervalDays)
+      ? nextInterval(state.intervalDays, state.lapses)
       : rating === "yellow"
-        ? YELLOW_INTERVAL
+        ? yellowInterval(state.intervalDays)
         : RED_INTERVAL;
 
   return {
     dueOn: addDays(today, intervalDays),
     intervalDays,
     lapses: rating === "red" ? state.lapses + 1 : state.lapses,
+    streak: rating === "green" ? state.streak + 1 : 0,
   };
+}
+
+export const TIERS = ["new", "relearning", "consolidating", "mature"] as const;
+export type Tier = (typeof TIERS)[number];
+
+export interface TierState {
+  lastRating: Rating | null;
+  lapses: number;
+  streak: number;
+  intervalDays: number;
+}
+
+/**
+ * How far an item has come, from the four fields on its row.
+ *
+ * "relearning", not "weak": select() has a weak bucket with a broader meaning
+ * that includes the objective's dashboard history. Bucket says why an item
+ * was chosen today; tier says how to treat it. No single rating reaches
+ * mature — that takes three greens in a row and a fortnight's interval.
+ */
+export function tierOf(state: TierState): Tier {
+  if (state.lastRating === null) return "new";
+  if (state.lastRating === "red" || state.lastRating === "yellow") {
+    return "relearning";
+  }
+  if (state.streak >= MATURE_STREAK && state.intervalDays >= MATURE_INTERVAL) {
+    return "mature";
+  }
+  return "consolidating";
 }
 
 /** Rating severity, worst first — the order used to summarise a day's attempts. */
