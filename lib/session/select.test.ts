@@ -20,6 +20,7 @@ function candidate(overrides: Partial<Candidate> & { reviewItemId: number }): Ca
     dueOn: "2099-01-01",
     intervalDays: 0,
     lapses: 0,
+    streak: 0,
     lastRating: null,
     loSuspended: false,
     lectureCommittedOn: "2020-01-01",
@@ -355,4 +356,20 @@ test("only a single-format family falls back to repeating the previous format", 
   // give way — a repeated format beats no question at all.
   const family = ["synthesis"] as const;
   expect(allowedFormats([...family], [], "synthesis")).toEqual([...family]);
+});
+
+test("each slot carries the item's tier at plan time", () => {
+  const candidates = [
+    candidate({ reviewItemId: 1, lectureId: 1 }),
+    candidate({ reviewItemId: 2, lectureId: 2, lastRating: "red", lapses: 1, intervalDays: 1 }),
+    candidate({ reviewItemId: 3, lectureId: 3, lastRating: "green", streak: 1, intervalDays: 1 }),
+    candidate({ reviewItemId: 4, lectureId: 4, lastRating: "green", streak: 4, intervalDays: 14 }),
+  ];
+  const plan = select(candidates, { today: TODAY });
+
+  const tierOf = (id: number) => plan.find((slot) => slot.reviewItemId === id)?.tier;
+  expect(tierOf(1)).toBe("new");
+  expect(tierOf(2)).toBe("relearning");
+  expect(tierOf(3)).toBe("consolidating");
+  expect(tierOf(4)).toBe("mature");
 });

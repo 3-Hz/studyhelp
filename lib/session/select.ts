@@ -1,5 +1,5 @@
 import type { Rating, ReviewKind } from "@/lib/db/schema";
-import { daysBetween } from "@/lib/schedule";
+import { daysBetween, tierOf, type Tier } from "@/lib/schedule";
 import type { QuestionFormat } from "@/lib/tutor";
 
 /**
@@ -29,6 +29,7 @@ export interface Candidate {
   dueOn: string;
   intervalDays: number;
   lapses: number;
+  streak: number;
   lastRating: Rating | null;
   loSuspended: boolean;
   lectureCommittedOn: string;
@@ -40,6 +41,12 @@ export interface PlannedSlot {
   /** 1-based position in the running order. */
   slot: number;
   bucket: Bucket;
+  /**
+   * The item's mastery tier when the plan was made. Frozen with the plan:
+   * the row does not change until finish, and a session stays explainable
+   * from its plan alone.
+   */
+  tier: Tier;
   loId: number;
   reviewItemId: number;
   /** Concepts from other lectures a cumulative question should reach for. */
@@ -371,6 +378,7 @@ function order(picks: Pick[]): PlannedSlot[] {
       return {
         slot: index + 1,
         bucket: pick.bucket,
+        tier: tierOf(pick.candidate),
         loId: pick.candidate.loId,
         reviewItemId: pick.candidate.reviewItemId,
         companionItemIds,
