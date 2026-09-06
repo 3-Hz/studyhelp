@@ -25,8 +25,8 @@ export interface TurnPlan {
 }
 
 /**
- * Order: recall every objective, summarise the lecture, then elaborate on
- * whatever did not come back cleanly.
+ * Order: recall every objective, summarise the lecture, elaborate on whatever
+ * did not come back cleanly, then reflect.
  *
  * Elaboration is deliberately limited to objectives that scored below green.
  * That is prompt.txt Retrieval Rule 5 — after a correction, retrieve again —
@@ -37,6 +37,7 @@ export interface TurnPlan {
 export function planNextTurn(
   objectives: PlannedObjective[],
   graded: GradedTurn[],
+  options: { reflected: boolean } = { reflected: false },
 ): TurnPlan | null {
   // Suspended objectives are dark green: do not quiz until reactivated.
   const active = objectives
@@ -64,5 +65,10 @@ export function planNextTurn(
     }
   }
 
+  // Every session closes with the student's own account of it (prompt.txt
+  // "Elaboration and Reflection": key ideas, hardest point, corrected
+  // misconception, remaining uncertainty). It is ungraded, so it is never in
+  // `graded`; the caller says whether it has been given.
+  if (!options.reflected) return { stage: "reflection", loId: null };
   return null;
 }

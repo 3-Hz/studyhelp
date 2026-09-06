@@ -4,6 +4,7 @@ import type { Rating } from "@/lib/db/schema";
 import {
   capRating,
   nextSchedule,
+  tierOf,
   todayIso,
   worstByLo,
   worstRating,
@@ -14,9 +15,10 @@ import {
   giveHint,
   summariseSession,
   type DebriefOutput,
+  type DebriefRequest,
   type QuestionFormat,
 } from "@/lib/tutor";
-import type { AttemptRow, SessionKind, SessionRow, TutorDeps } from "./kind";
+import type { AttemptRow, Outcome, SessionKind, SessionRow, TurnWhy, TutorDeps } from "./kind";
 import { sameDayKind } from "./sameDay";
 
 /**
@@ -30,6 +32,19 @@ import { sameDayKind } from "./sameDay";
 export type { TutorDeps } from "./kind";
 
 const REAL_TUTOR: TutorDeps = { askQuestion, gradeAnswer, giveHint, summariseSession };
+
+/**
+ * The reflection question, fixed and code-owned: prompt.txt's close-out asked
+ * as one turn, at no model cost.
+ */
+export const REFLECTION_QUESTION: Record<SessionRow["type"], string> = {
+  same_day:
+    "Without looking back: what were the key ideas of this lecture, what was the hardest point, what misconception did you correct today, and what are you still unsure of?",
+  daily:
+    "Before the summary: what was the hardest question today, what did you get wrong and what is the correction you would give yourself, and what are you still unsure of?",
+};
+
+const REFLECTION_FORMAT = "reflection";
 
 export interface Turn {
   attemptId: number;
@@ -86,14 +101,13 @@ function toTurn(
   attempt: AttemptRow,
   loaded: Loaded,
 ): Turn {
-  const context = loaded.kind.turnContext(
-    {
-      stage: attempt.stage,
-      loId: attempt.loId,
-      reviewItemId: attempt.reviewItemId,
-    },
-    loaded.material,
-  );
+  const context =
+    attempt.stage === "reflection"
+      ? null
+      : loaded.kind.turnContext(
+          { stage: attempt.stage, loId: attempt.loId, reviewItemId: attempt.reviewItemId },
+          loaded.material,
+        );
 
   const progress = loaded.kind.progress?.(loaded.material, loaded.attempts) ?? {
     position: loaded.attempts.filter((a) => a.rating !== null).length + 1,
@@ -104,8 +118,8 @@ function toTurn(
     attemptId: attempt.id,
     stage: attempt.stage,
     loId: attempt.loId,
-    objective: context.objective ?? null,
-    lectureTitle: context.lectureTitle || null,
+    objective: context?.objective ?? null,
+    lectureTitle: context?.lectureTitle || null,
     format: attempt.format,
     question: attempt.question,
     hintsUsed: attempt.hintsUsed,
@@ -127,11 +141,28 @@ export async function currentTurn(
 ): Promise<Turn | null> {
   const loaded = await load(sessionId);
 
-  const pending = loaded.attempts.find((attempt) => attempt.rating === null);
+  // Pending means unanswered, not ungraded: the reflection is answered and
+  // never graded, and for every other stage the two are set together.
+  const pending = loaded.attempts.find((attempt) => attempt.studentAnswer === null);
   if (pending) return toTurn(pending, loaded);
 
   const planned = loaded.kind.planNext(loaded.material, loaded.attempts);
   if (!planned) return null;
+
+  if (planned.stage === "reflection") {
+    const [created] = await db
+      .insert(schema.attempts)
+      .values({
+        sessionId,
+        stage: "reflection",
+        loId: null,
+        reviewItemId: null,
+        format: REFLECTION_FORMAT,
+        question: REFLECTION_QUESTION[loaded.session.type],
+      })
+      .returning();
+    return toTurn(created, { ...loaded, attempts: [...loaded.attempts, created] });
+  }
 
   const context = loaded.kind.turnContext(planned, loaded.material);
 
@@ -140,6 +171,7 @@ export async function currentTurn(
     usedFormats: loaded.attempts.map((a) => a.format as QuestionFormat),
     allowedFormats: planned.allowedFormats,
     bucket: planned.bucket,
+    tier: planned.tier,
   });
 
   const [created] = await db
@@ -162,17 +194,29 @@ export interface TurnFeedback {
   /** The model's rating before capRating. Differs only when a cue was taken. */
   modelRating: Rating;
   grade: Awaited<ReturnType<typeof gradeAnswer>>;
+  /** Why the turn was shaped as it was. Daily turns only. */
+  why?: TurnWhy;
 }
 
 export async function submitAnswer(
   sessionId: number,
   answer: string,
   deps: TutorDeps = REAL_TUTOR,
-): Promise<TurnFeedback> {
+): Promise<TurnFeedback | null> {
   const loaded = await load(sessionId);
 
-  const pending = loaded.attempts.find((attempt) => attempt.rating === null);
+  const pending = loaded.attempts.find((attempt) => attempt.studentAnswer === null);
   if (!pending) throw new Error("There is no question waiting to be answered.");
+
+  // The reflection is the student's account of the session: stored, never
+  // graded, and the runner's only turn that ends with no feedback.
+  if (pending.stage === "reflection") {
+    await db
+      .update(schema.attempts)
+      .set({ studentAnswer: answer })
+      .where(eq(schema.attempts.id, pending.id));
+    return null;
+  }
 
   const context = loaded.kind.turnContext(pending, loaded.material);
 
@@ -190,7 +234,12 @@ export async function submitAnswer(
     .set({ studentAnswer: answer, rating, feedback: JSON.stringify(grade) })
     .where(eq(schema.attempts.id, pending.id));
 
-  return { rating, modelRating: grade.rating, grade };
+  return {
+    rating,
+    modelRating: grade.rating,
+    grade,
+    why: loaded.kind.explain?.(pending, loaded.material),
+  };
 }
 
 /**
@@ -204,8 +253,12 @@ export async function requestHint(
 ): Promise<string> {
   const loaded = await load(sessionId);
 
-  const pending = loaded.attempts.find((attempt) => attempt.rating === null);
+  const pending = loaded.attempts.find((attempt) => attempt.studentAnswer === null);
   if (!pending) throw new Error("There is no question waiting to be answered.");
+
+  if (pending.stage === "reflection") {
+    throw new Error("The reflection has no cue — it is your own account of the session.");
+  }
 
   const context = loaded.kind.turnContext(pending, loaded.material);
 
@@ -230,6 +283,32 @@ export interface SessionResult {
   ratingByLo: Record<number, Rating>;
   /** Null when the session has no close-out, or the summary call failed. */
   debrief: DebriefOutput | null;
+  /** One entry per review item that moved, in the order they were walked. */
+  outcomes: Outcome[];
+}
+
+/**
+ * What the close-out summary sees: every graded turn with what it missed and
+ * got wrong. Kind-agnostic — a same-day session and a daily one are debriefed
+ * the same way.
+ */
+function debriefRequest(attempts: AttemptRow[]): DebriefRequest {
+  const answered = attempts
+    .filter((attempt) => attempt.rating !== null)
+    .map((attempt) => {
+      const grade = attempt.feedback
+        ? (JSON.parse(attempt.feedback) as { missing?: string[]; incorrect?: string[] })
+        : {};
+      return {
+        question: attempt.question,
+        rating: attempt.rating as string,
+        missing: grade.missing ?? [],
+        incorrect: grade.incorrect ?? [],
+      };
+    });
+  const reflection =
+    attempts.find((attempt) => attempt.stage === "reflection")?.studentAnswer ?? null;
+  return { answered, reflection };
 }
 
 /**
@@ -286,17 +365,17 @@ export async function finishSession(
     }
   }
 
-  const outcomes = loaded.kind.itemOutcomes(loaded.attempts, loaded.material);
-  let reviewItemsRescheduled = 0;
+  const moves = loaded.kind.itemOutcomes(loaded.attempts, loaded.material);
+  const outcomes: Outcome[] = [];
 
-  for (const [itemId, rating] of outcomes) {
+  for (const [itemId, rating] of moves) {
     const item = await db.query.reviewItems.findFirst({
       where: eq(schema.reviewItems.id, itemId),
     });
     if (!item) continue;
 
     const next = nextSchedule(
-      { intervalDays: item.intervalDays, lapses: item.lapses },
+      { intervalDays: item.intervalDays, lapses: item.lapses, streak: item.streak },
       rating,
       today,
     );
@@ -307,22 +386,26 @@ export async function finishSession(
         dueOn: next.dueOn,
         intervalDays: next.intervalDays,
         lapses: next.lapses,
+        streak: next.streak,
         lastRating: rating,
       })
       .where(eq(schema.reviewItems.id, item.id));
 
-    reviewItemsRescheduled++;
+    outcomes.push({
+      reviewItemId: item.id,
+      concept: item.concept,
+      rating,
+      tierBefore: tierOf(item),
+      tierAfter: tierOf({ ...next, lastRating: rating }),
+      dueOn: next.dueOn,
+    });
   }
 
-  let debrief: unknown = null;
-  if (loaded.kind.closeOut) {
+  let debrief: DebriefOutput | null = null;
+  const request = debriefRequest(loaded.attempts);
+  if (request.answered.length > 0) {
     try {
-      debrief = await loaded.kind.closeOut({
-        session: loaded.session,
-        attempts: loaded.attempts,
-        material: loaded.material,
-        deps,
-      });
+      debrief = await deps.summariseSession(request);
     } catch (error) {
       // The cells and the schedule are the session's real output. A summary
       // that failed to generate is not worth losing them over.
@@ -332,14 +415,15 @@ export async function finishSession(
 
   await db
     .update(schema.sessions)
-    .set({ endedAt: now, ...(debrief ? { debrief } : {}) })
+    .set({ endedAt: now, outcomes, ...(debrief ? { debrief } : {}) })
     .where(eq(schema.sessions.id, sessionId));
 
   return {
     cellsWritten: testedLoIds.length,
-    reviewItemsRescheduled,
+    reviewItemsRescheduled: outcomes.length,
     ratingByLo,
-    debrief: (debrief as DebriefOutput) ?? null,
+    debrief,
+    outcomes,
   };
 }
 

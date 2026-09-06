@@ -37,7 +37,12 @@ export default async function HomePage() {
               >
                 <div>
                   {lecture.committedAt ? (
-                    <span className="font-medium">{lecture.title}</span>
+                    <Link
+                      href={`/lectures/${lecture.id}/concepts`}
+                      className="font-medium hover:underline"
+                    >
+                      {lecture.title}
+                    </Link>
                   ) : (
                     <Link
                       href={`/lectures/${lecture.id}/review`}

@@ -2,8 +2,10 @@ import { eq } from "drizzle-orm";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db, schema } from "@/lib/db";
+import type { Outcome } from "@/lib/session/kind";
 import type { DebriefOutput } from "@/lib/tutor/schema";
 import { Debrief } from "./Debrief";
+import { Outcomes } from "./Outcomes";
 import SessionTurn from "./SessionTurn";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +35,7 @@ export default async function SessionPage({
 
   if (session.endedAt) {
     const debrief = session.debrief as DebriefOutput | null;
+    const outcomes = session.outcomes as Outcome[] | null;
     return (
       <div className="max-w-2xl">
         <h1 className="text-2xl font-semibold tracking-tight">{heading}</h1>
@@ -43,6 +46,7 @@ export default async function SessionPage({
           </Link>
           .
         </p>
+        {session.type === "daily" && outcomes && <Outcomes outcomes={outcomes} />}
         {debrief && <Debrief debrief={debrief} />}
       </div>
     );

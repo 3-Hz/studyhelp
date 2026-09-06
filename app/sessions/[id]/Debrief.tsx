@@ -12,6 +12,14 @@ export function Debrief({ debrief }: { debrief: DebriefOutput }) {
         </h3>
         <p className="mt-1 text-sm">{debrief.focusNext}</p>
       </div>
+      {debrief.calibration && debrief.calibration.trim().length > 0 && (
+        <div className="mt-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-500">
+            Your account versus the record
+          </h3>
+          <p className="mt-1 text-sm">{debrief.calibration}</p>
+        </div>
+      )}
     </div>
   );
 }

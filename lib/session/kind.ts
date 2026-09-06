@@ -1,5 +1,6 @@
 import type * as schema from "@/lib/db/schema";
 import type { Rating, SessionStage } from "@/lib/db/schema";
+import type { Tier } from "@/lib/schedule";
 import type { QuestionFormat, TurnContext } from "@/lib/tutor";
 import type {
   askQuestion,
@@ -32,6 +33,33 @@ export interface PlannedTurn extends TurnRef {
   allowedFormats?: QuestionFormat[];
   /** Why select() picked this slot for daily practice. Absent for same-day turns. */
   bucket?: Bucket;
+  /** The item's mastery tier, from the plan. Absent for same-day turns. */
+  tier?: Tier;
+}
+
+/** What finishing did to one review item. Stored on sessions.outcomes. */
+export interface Outcome {
+  reviewItemId: number;
+  /** Snapshotted: the concept as it was asked, so a finished session needs no join. */
+  concept: string;
+  rating: Rating;
+  tierBefore: Tier;
+  tierAfter: Tier;
+  dueOn: string;
+}
+
+/**
+ * Why a daily turn was shaped as it was. Shown only after grading: a
+ * judgement of learning handed over before the attempt is the anchor the
+ * calibration literature wants removed.
+ */
+export interface TurnWhy {
+  bucket: Bucket;
+  tier: Tier;
+  lapses: number;
+  streak: number;
+  intervalDays: number;
+  dueOn: string;
 }
 
 /**
@@ -56,11 +84,6 @@ export interface SessionKind<M> {
   /** Where the student is. Omitted when the length is not known in advance. */
   progress?(material: M, attempts: AttemptRow[]): { position: number; total: number | null };
 
-  /** Optional close-out. Whatever it returns is stored on sessions.debrief. */
-  closeOut?(args: {
-    session: SessionRow;
-    attempts: AttemptRow[];
-    material: M;
-    deps: TutorDeps;
-  }): Promise<unknown>;
+  /** The turn's selection story, for the badge. Omitted by kinds without one. */
+  explain?(turn: TurnRef, material: M): TurnWhy | undefined;
 }

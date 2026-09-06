@@ -57,10 +57,14 @@ test("elaborates only on objectives that fell short of green", () => {
   });
 });
 
-test("a session where everything came back cleanly ends after the summary", () => {
+test("a session where everything came back cleanly closes with a reflection", () => {
   const graded = [recalled(1, "green"), recalled(2, "green"), summarised];
 
-  expect(planNextTurn(objectives, graded)).toBeNull();
+  expect(planNextTurn(objectives, graded)).toEqual({
+    stage: "reflection",
+    loId: null,
+  });
+  expect(planNextTurn(objectives, graded, { reflected: true })).toBeNull();
 });
 
 test("yellow earns an elaboration turn just as red does", () => {
@@ -72,7 +76,7 @@ test("yellow earns an elaboration turn just as red does", () => {
   });
 });
 
-test("the session ends once every elaboration is graded", () => {
+test("the session ends once every elaboration is graded and the reflection given", () => {
   const graded: GradedTurn[] = [
     recalled(1, "red"),
     recalled(2, "yellow"),
@@ -81,7 +85,11 @@ test("the session ends once every elaboration is graded", () => {
     { stage: "elaboration", loId: 2, rating: "green" },
   ];
 
-  expect(planNextTurn(objectives, graded)).toBeNull();
+  expect(planNextTurn(objectives, graded)).toEqual({
+    stage: "reflection",
+    loId: null,
+  });
+  expect(planNextTurn(objectives, graded, { reflected: true })).toBeNull();
 });
 
 test("suspended objectives are never quizzed", () => {
@@ -110,7 +118,17 @@ test("a lecture whose objectives are all suspended still asks for a summary", ()
     stage: "summary",
     loId: null,
   });
-  expect(planNextTurn(allSuspended, [summarised])).toBeNull();
+  expect(planNextTurn(allSuspended, [summarised])).toEqual({
+    stage: "reflection",
+    loId: null,
+  });
+  expect(planNextTurn(allSuspended, [summarised], { reflected: true })).toBeNull();
+});
+
+test("the reflection never comes before recall, summary or elaboration", () => {
+  expect(planNextTurn(objectives, [])?.stage).toBe("lo_recall");
+  const graded = [recalled(1, "red"), recalled(2, "green"), summarised];
+  expect(planNextTurn(objectives, graded)?.stage).toBe("elaboration");
 });
 
 test("planning is stable — the same state yields the same next turn", () => {

@@ -1,10 +1,11 @@
 import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import type { Rating } from "@/lib/db/schema";
-import { startOfToday, todayIso } from "@/lib/schedule";
-import type { ConceptContext, QuestionFormat } from "@/lib/tutor";
+import { startOfToday, tierOf, todayIso } from "@/lib/schedule";
+import type { ConceptContext, PriorAttempt, QuestionFormat } from "@/lib/tutor";
 import type { SessionKind } from "./kind";
 import { dailyCandidates } from "./candidates";
+import { priorAttempts } from "./prior";
 import { allowedFormats, select, type PlannedSlot } from "./select";
 
 /**
@@ -24,6 +25,7 @@ export interface DailyMaterial {
   objectiveById: Map<number, ObjectiveRow>;
   lectureTitleById: Map<number, string>;
   siblingsByLo: Map<number, ReviewItemRow[]>;
+  priorByItem: Map<number, PriorAttempt>;
 }
 
 export async function startDailySession(now: Date = new Date()): Promise<number> {
@@ -107,12 +109,15 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       siblingsByLo.set(item.loId, list);
     }
 
+    const priorByItem = await priorAttempts(session.id, plan);
+
     return {
       plan,
       itemById: new Map([...planned, ...siblings].map((item) => [item.id, item])),
       objectiveById: new Map(objectives.map((objective) => [objective.id, objective])),
       lectureTitleById: new Map(lectures.map((lecture) => [lecture.id, lecture.title])),
       siblingsByLo,
+      priorByItem,
     };
   },
 
@@ -124,7 +129,11 @@ export const dailyKind: SessionKind<DailyMaterial> = {
     );
 
     const next = material.plan.find((slot) => !asked.has(slot.reviewItemId));
-    if (!next) return null;
+    if (!next) {
+      // Ten questions, then the student's own account of them.
+      if (attempts.some((attempt) => attempt.stage === "reflection")) return null;
+      return { stage: "reflection", loId: null, reviewItemId: null };
+    }
 
     const used = attempts.map((attempt) => attempt.format as QuestionFormat);
 
@@ -138,6 +147,7 @@ export const dailyKind: SessionKind<DailyMaterial> = {
         used[used.length - 1],
       ),
       bucket: next.bucket,
+      tier: next.tier,
     };
   },
 
@@ -193,6 +203,9 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       lectureTitle: lectureTitleFor(objective),
       objective: objective.text,
       targetConcept: item?.concept,
+      ...(item && material.priorByItem.has(item.id)
+        ? { lastAttempt: material.priorByItem.get(item.id) }
+        : {}),
       concepts: [
         ...(item ? [flatten(item)] : []),
         ...siblings.map((row) => flatten(row)),
@@ -212,34 +225,26 @@ export const dailyKind: SessionKind<DailyMaterial> = {
   },
 
   progress(material, attempts) {
-    // Graded attempts only: the question in hand is the one being counted, not
-    // one already behind the student.
-    const answered = attempts.filter((attempt) => attempt.rating !== null).length;
-    return {
-      position: Math.min(answered + 1, material.plan.length),
-      total: material.plan.length,
-    };
+    // Answered turns only: the question in hand is the one being counted, not
+    // one already behind the student. The reflection is the last position.
+    const answered = attempts.filter((attempt) => attempt.studentAnswer !== null).length;
+    const total = material.plan.length + 1;
+    return { position: Math.min(answered + 1, total), total };
   },
 
-  async closeOut({ attempts, deps }) {
-    const answered = attempts
-      .filter((attempt) => attempt.rating !== null)
-      .map((attempt) => {
-        const grade = attempt.feedback
-          ? (JSON.parse(attempt.feedback) as {
-              missing?: string[];
-              incorrect?: string[];
-            })
-          : {};
-        return {
-          question: attempt.question,
-          rating: attempt.rating as string,
-          missing: grade.missing ?? [],
-          incorrect: grade.incorrect ?? [],
-        };
-      });
-
-    if (answered.length === 0) return null;
-    return deps.summariseSession({ answered });
+  explain(turn, material) {
+    if (turn.reviewItemId === null) return undefined;
+    const slot = material.plan.find((s) => s.reviewItemId === turn.reviewItemId);
+    const item = material.itemById.get(turn.reviewItemId);
+    if (!slot || !item) return undefined;
+    return {
+      bucket: slot.bucket,
+      // A plan frozen before tiers existed carries none; the row can say.
+      tier: slot.tier ?? tierOf(item),
+      lapses: item.lapses,
+      streak: item.streak,
+      intervalDays: item.intervalDays,
+      dueOn: item.dueOn,
+    };
   },
 };

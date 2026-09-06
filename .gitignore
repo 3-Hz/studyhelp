@@ -51,3 +51,6 @@ eval.config.ts
 *.db-shm
 /uploads
 /.test-uploads-*
+
+# git worktrees for isolated feature work
+/.worktrees

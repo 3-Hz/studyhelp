@@ -4,18 +4,23 @@ import {
   capRating,
   daysBetween,
   LADDER,
+  LAPSED_LADDER,
   nextInterval,
   nextSchedule,
+  tierOf,
   todayIso,
   worstByLo,
   worstRating,
+  yellowInterval,
+  type Tier,
 } from "./schedule";
+import type { Rating } from "@/lib/db/schema";
 
 const TODAY = "2026-03-01";
 
 test("green walks up the ladder one rung at a time", () => {
   const walked: number[] = [];
-  let state = { intervalDays: 0, lapses: 0 };
+  let state = { intervalDays: 0, lapses: 0, streak: 0 };
 
   for (let i = 0; i < LADDER.length - 1; i++) {
     state = nextSchedule(state, "green", TODAY);
@@ -34,15 +39,32 @@ test("an interval between rungs advances to the next rung, not past it", () => {
   expect(nextInterval(45)).toBe(60);
 });
 
-test("yellow drops to the 1-3 day band however far the item had got", () => {
-  const result = nextSchedule({ intervalDays: 30, lapses: 0 }, "yellow", TODAY);
+test("yellow halves the interval, held within the 1–3 day band", () => {
+  const result = nextSchedule(
+    { intervalDays: 30, lapses: 0, streak: 4 },
+    "yellow",
+    TODAY,
+  );
 
-  expect(result.intervalDays).toBe(2);
-  expect(result.dueOn).toBe("2026-03-03");
+  expect(result.intervalDays).toBe(3);
+  expect(result.dueOn).toBe("2026-03-04");
+});
+
+test("yellowInterval at the edges of the band", () => {
+  expect(yellowInterval(0)).toBe(1);
+  expect(yellowInterval(3)).toBe(1);
+  expect(yellowInterval(4)).toBe(2);
+  expect(yellowInterval(5)).toBe(2);
+  expect(yellowInterval(6)).toBe(3);
+  expect(yellowInterval(60)).toBe(3);
 });
 
 test("red returns tomorrow and counts a lapse", () => {
-  const result = nextSchedule({ intervalDays: 14, lapses: 1 }, "red", TODAY);
+  const result = nextSchedule(
+    { intervalDays: 14, lapses: 1, streak: 0 },
+    "red",
+    TODAY,
+  );
 
   expect(result.intervalDays).toBe(1);
   expect(result.dueOn).toBe("2026-03-02");
@@ -50,7 +72,7 @@ test("red returns tomorrow and counts a lapse", () => {
 });
 
 test("only red counts a lapse", () => {
-  const from = { intervalDays: 3, lapses: 4 };
+  const from = { intervalDays: 3, lapses: 4, streak: 0 };
 
   expect(nextSchedule(from, "green", TODAY).lapses).toBe(4);
   expect(nextSchedule(from, "yellow", TODAY).lapses).toBe(4);
@@ -58,7 +80,7 @@ test("only red counts a lapse", () => {
 
 test("suspended leaves the interval and lapses untouched", () => {
   const result = nextSchedule(
-    { intervalDays: 30, lapses: 2 },
+    { intervalDays: 30, lapses: 2, streak: 0 },
     "suspended",
     TODAY,
   );
@@ -69,7 +91,11 @@ test("suspended leaves the interval and lapses untouched", () => {
 
 test("dueOn is always today plus the stored interval", () => {
   for (const rating of ["green", "yellow", "red", "suspended"] as const) {
-    const result = nextSchedule({ intervalDays: 7, lapses: 0 }, rating, TODAY);
+    const result = nextSchedule(
+      { intervalDays: 7, lapses: 0, streak: 0 },
+      rating,
+      TODAY,
+    );
     expect(result.dueOn).toBe(addDays(TODAY, result.intervalDays));
   }
 });
@@ -154,4 +180,101 @@ test("daysBetween counts whole calendar days in either direction", () => {
 // and round to the wrong integer for anyone doing calendar maths on it.
 test("daysBetween is not disturbed by a daylight-saving boundary", () => {
   expect(daysBetween("2026-10-31", "2026-11-03")).toBe(3);
+});
+
+test("an item that has lapsed climbs the denser ladder", () => {
+  const walked: number[] = [];
+  let state = { intervalDays: 1, lapses: 1, streak: 0 };
+
+  for (let i = 0; i < 6; i++) {
+    state = nextSchedule(state, "green", TODAY);
+    walked.push(state.intervalDays);
+  }
+
+  expect(walked).toEqual([2, 3, 5, 7, 10, 14]);
+  expect(LAPSED_LADDER).toEqual([0, 1, 2, 3, 5, 7, 10, 14, 21, 30, 45, 60]);
+});
+
+test("the lapsed ladder also doubles past its top, and advances between rungs", () => {
+  expect(nextInterval(60, 1)).toBe(120);
+  expect(nextInterval(4, 1)).toBe(5);
+  expect(nextInterval(4, 0)).toBe(7);
+});
+
+test("green extends the streak; yellow and red reset it", () => {
+  const from = { intervalDays: 7, lapses: 0, streak: 2 };
+
+  expect(nextSchedule(from, "green", TODAY).streak).toBe(3);
+  expect(nextSchedule(from, "yellow", TODAY).streak).toBe(0);
+  expect(nextSchedule(from, "red", TODAY).streak).toBe(0);
+});
+
+test("suspended leaves the streak alone", () => {
+  const result = nextSchedule(
+    { intervalDays: 30, lapses: 2, streak: 5 },
+    "suspended",
+    TODAY,
+  );
+  expect(result.streak).toBe(5);
+});
+
+test("tierOf reads the four-field state", () => {
+  const cases: [Parameters<typeof tierOf>[0], Tier][] = [
+    [{ lastRating: null, lapses: 0, streak: 0, intervalDays: 0 }, "new"],
+    [{ lastRating: "red", lapses: 1, streak: 0, intervalDays: 1 }, "relearning"],
+    [{ lastRating: "yellow", lapses: 0, streak: 0, intervalDays: 2 }, "relearning"],
+    [{ lastRating: "green", lapses: 0, streak: 1, intervalDays: 1 }, "consolidating"],
+    // Three greens but not yet at 14 days.
+    [{ lastRating: "green", lapses: 0, streak: 3, intervalDays: 7 }, "consolidating"],
+    // At 14 days but not three greens in a row (a backfilled or lapsed item).
+    [{ lastRating: "green", lapses: 1, streak: 2, intervalDays: 14 }, "consolidating"],
+    [{ lastRating: "green", lapses: 0, streak: 3, intervalDays: 14 }, "mature"],
+    [{ lastRating: "green", lapses: 3, streak: 6, intervalDays: 14 }, "mature"],
+    // The grade schema forbids "suspended", but the column type allows it.
+    [{ lastRating: "suspended", lapses: 0, streak: 4, intervalDays: 30 }, "mature"],
+  ];
+  for (const [state, tier] of cases) {
+    expect(tierOf(state)).toBe(tier);
+  }
+});
+
+/** Runs a rating sequence from new, returning the interval and tier after each. */
+function replay(ratings: Rating[]): { interval: number; tier: Tier }[] {
+  let state = { intervalDays: 0, lapses: 0, streak: 0, lastRating: null as Rating | null };
+  const trail: { interval: number; tier: Tier }[] = [];
+  for (const rating of ratings) {
+    const next = nextSchedule(state, rating, TODAY);
+    state = { ...next, lastRating: rating };
+    trail.push({ interval: next.intervalDays, tier: tierOf(state) });
+  }
+  return trail;
+}
+
+test("the fourth green from new is mature at 14 days", () => {
+  expect(replay(["green", "green", "green", "green"])).toEqual([
+    { interval: 1, tier: "consolidating" },
+    { interval: 3, tier: "consolidating" },
+    { interval: 7, tier: "consolidating" },
+    { interval: 14, tier: "mature" },
+  ]);
+});
+
+test("a lapse at 14 takes six greens to return to mature", () => {
+  const trail = replay(["green", "green", "green", "green", "red", "green", "green", "green", "green", "green", "green"]);
+
+  expect(trail[4]).toEqual({ interval: 1, tier: "relearning" });
+  expect(trail.slice(5).map((step) => step.interval)).toEqual([2, 3, 5, 7, 10, 14]);
+  expect(trail.slice(5, 10).every((step) => step.tier === "consolidating")).toBe(true);
+  expect(trail[10].tier).toBe("mature");
+});
+
+test("no single rating produces mature", () => {
+  for (const rating of ["green", "yellow", "red"] as const) {
+    expect(replay([rating])[0].tier).not.toBe("mature");
+  }
+  // Nor does a single green on an item that was already far up the ladder
+  // but has no streak, e.g. after a backfill of a lapsed item.
+  expect(
+    tierOf({ ...nextSchedule({ intervalDays: 30, lapses: 1, streak: 0 }, "green", TODAY), lastRating: "green" }),
+  ).toBe("consolidating");
 });

@@ -29,14 +29,17 @@ export type ReviewKind = (typeof REVIEW_KINDS)[number];
 
 /**
  * The same-day review runs lo_recall → summary → elaboration in order
- * (prompt.txt "Same-Day Retrieval Practice"). Daily practice has one stage:
- * its variety comes from the question format, not from a running order.
+ * (prompt.txt "Same-Day Retrieval Practice"). Daily practice has one graded
+ * stage: its variety comes from the question format, not from a running
+ * order. Both close with a reflection — the student's own account of the
+ * session, ungraded.
  */
 export const SESSION_STAGES = [
   "lo_recall",
   "summary",
   "elaboration",
   "daily",
+  "reflection",
 ] as const;
 export type SessionStage = (typeof SESSION_STAGES)[number];
 
@@ -200,6 +203,11 @@ export const reviewItems = sqliteTable(
     intervalDays: integer("interval_days").notNull().default(0),
     lastRating: text("last_rating", { enum: RATINGS }),
     lapses: integer("lapses").notNull().default(0),
+    /**
+     * Consecutive greens; red or yellow resets it. With intervalDays, lapses
+     * and lastRating this is the whole mastery state — see tierOf.
+     */
+    streak: integer("streak").notNull().default(0),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(now),
@@ -222,6 +230,12 @@ export const sessions = sqliteTable("sessions", {
   plan: text("plan", { mode: "json" }),
   /** The close-out summary, written when the session is finished. */
   debrief: text("debrief", { mode: "json" }),
+  /**
+   * What finishing did to each review item: rating, tier before and after,
+   * new due date. The code-owned half of the close-out, beside the
+   * model-owned debrief.
+   */
+  outcomes: text("outcomes", { mode: "json" }),
   startedAt: integer("started_at", { mode: "timestamp" })
     .notNull()
     .default(now),

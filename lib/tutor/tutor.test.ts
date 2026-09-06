@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import type { LanguageModelV4GenerateResult } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import type { ModelProfile } from "@/lib/llm/config";
-import { askQuestion, gradeAnswer, giveHint } from "./index";
+import { askQuestion, gradeAnswer, giveHint, summariseSession } from "./index";
 import { GradeOutput, QuestionOutput } from "./schema";
 
 /**
@@ -207,6 +207,16 @@ test("the objective is omitted cleanly for the whole-lecture summary", async () 
   expect(prompts[0]).toMatch(/no concepts were extracted/);
 });
 
+test("the tutor refuses to compose the reflection, which is fixed text", async () => {
+  const model = new MockLanguageModelV4({
+    doGenerate: async () => textResult('{"format":"summary","question":"Never asked."}'),
+  });
+
+  await expect(
+    askQuestion({ stage: "reflection", lectureTitle: "Amyloidosis", concepts: [] }, { profile, model }),
+  ).rejects.toThrow(/fixed text/i);
+});
+
 test("QuestionOutput accepts an absent targetConcept", () => {
   const parsed = QuestionOutput.safeParse({
     format: "free_recall",
@@ -214,4 +224,128 @@ test("QuestionOutput accepts an absent targetConcept", () => {
   });
 
   expect(parsed.success).toBe(true);
+});
+
+test("the student's reflection reaches the debrief prompt and calibration comes back", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult(
+        '{"heldUp":["Fibril structure"],"shaky":[],"misconceptions":[],' +
+          '"focusNext":"Precursors.","calibration":"You felt sure of the precursor and missed it."}',
+      );
+    },
+  });
+
+  const debrief = await summariseSession(
+    {
+      answered: [{ question: "Name the precursor.", rating: "red", missing: ["The precursor"], incorrect: [] }],
+      reflection: "I think I have the precursors down.",
+    },
+    { profile, model },
+  );
+
+  expect(prompts[0]).toMatch(/own account/i);
+  expect(prompts[0]).toMatch(/precursors down/);
+  expect(debrief.calibration).toMatch(/felt sure/);
+});
+
+test("a debrief without a reflection asks for no calibration, and parses without one", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult(
+        '{"heldUp":[],"shaky":["Precursors"],"misconceptions":[],"focusNext":"Precursors."}',
+      );
+    },
+  });
+
+  const debrief = await summariseSession(
+    { answered: [{ question: "Q", rating: "yellow", missing: [], incorrect: [] }], reflection: null },
+    { profile, model },
+  );
+
+  expect(prompts[0]).not.toMatch(/own account/i);
+  expect(debrief.calibration).toBe("");
+});
+
+test("the tier brief steers the question's demand", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult('{"format":"vignette","question":"A patient presents…"}');
+    },
+  });
+
+  await askQuestion({ ...context, stage: "daily", tier: "mature" }, { profile, model });
+  expect(prompts[0]).toMatch(/application or discrimination/i);
+  expect(prompts[0]).toMatch(/wrong ones are wrong/i);
+
+  await askQuestion({ ...context, stage: "daily", tier: "relearning" }, { profile, model });
+  expect(prompts[1]).toMatch(/one part of this concept/i);
+  expect(prompts[1]).not.toMatch(/application or discrimination/i);
+
+  await askQuestion({ ...context, stage: "daily", tier: "consolidating" }, { profile, model });
+  expect(prompts[2]).toMatch(/whole concept/i);
+});
+
+test("the bucket no longer reaches the prompt", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult('{"format":"free_recall","question":"Explain."}');
+    },
+  });
+
+  await askQuestion({ ...context, stage: "daily", bucket: "due" }, { profile, model });
+  expect(prompts[0]).not.toMatch(/spaced review/i);
+  expect(prompts[0]).not.toMatch(/gone badly/i);
+});
+
+test("the last attempt reaches the prompt, with a steer that depends on tier", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult('{"format":"mechanism","question":"Explain."}');
+    },
+  });
+  const lastAttempt = {
+    daysAgo: 3,
+    rating: "red" as const,
+    hintsUsed: false,
+    missing: ["Organ tropism"],
+    incorrect: ["Said ATTR comes from light chains"],
+    correction: "ATTR is transthyretin.",
+    aboutObjective: false,
+  };
+
+  await askQuestion(
+    { ...context, stage: "daily", tier: "relearning", lastAttempt },
+    { profile, model },
+  );
+  expect(prompts[0]).toMatch(/3 days ago/);
+  expect(prompts[0]).toMatch(/Organ tropism/);
+  expect(prompts[0]).toMatch(/light chains/);
+  expect(prompts[0]).toMatch(/transthyretin/);
+  expect(prompts[0]).toMatch(/target what was missed/i);
+
+  await askQuestion(
+    {
+      ...context,
+      stage: "daily",
+      tier: "mature",
+      lastAttempt: { ...lastAttempt, daysAgo: 1, rating: "green", hintsUsed: true, aboutObjective: true },
+    },
+    { profile, model },
+  );
+  expect(prompts[1]).toMatch(/yesterday/);
+  expect(prompts[1]).toMatch(/after a cue/);
+  expect(prompts[1]).toMatch(/objective as a whole/);
+  expect(prompts[1]).toMatch(/different route/i);
+  expect(prompts[1]).not.toMatch(/target what was missed/i);
 });

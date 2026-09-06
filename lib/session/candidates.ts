@@ -58,6 +58,7 @@ export async function dailyCandidates(): Promise<Candidate[]> {
       dueOn: item.dueOn,
       intervalDays: item.intervalDays,
       lapses: item.lapses,
+      streak: item.streak,
       lastRating: item.lastRating,
       loSuspended: objective.suspended,
       lectureCommittedOn: todayIso(lecture.committedAt),

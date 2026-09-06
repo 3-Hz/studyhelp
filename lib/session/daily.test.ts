@@ -1,13 +1,13 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 
 const TEST_DB = `./.test-daily-${process.pid}.db`;
 process.env.DATABASE_URL = TEST_DB;
 
 const { db, schema } = await import("../db");
 const { commitLecture } = await import("../commitLecture");
-const { addDays, todayIso } = await import("../schedule");
+const { addDays, todayIso, tierOf } = await import("../schedule");
 const { startDailySession } = await import("./daily");
 const { startSameDaySession } = await import("./sameDay");
 const { currentTurn, finishSession, submitAnswer } = await import("./runner");
@@ -98,6 +98,7 @@ function stubTutor(ratings: Rating[]): TutorDeps {
       shaky: ["AL versus ATTR"],
       misconceptions: [],
       focusNext: "Practise distinguishing the two precursor proteins.",
+      calibration: "",
     }),
   } as TutorDeps;
 }
@@ -105,11 +106,11 @@ function stubTutor(ratings: Rating[]): TutorDeps {
 /** Wraps a tutor's askQuestion to record every context it was called with. */
 function recordingTutor(
   base: TutorDeps,
-  contexts: { bucket?: string }[],
+  contexts: { bucket?: string; tier?: string }[],
 ): TutorDeps {
   return {
     askQuestion: async (context) => {
-      contexts.push({ bucket: context.bucket });
+      contexts.push({ bucket: context.bucket, tier: context.tier });
       return base.askQuestion(context);
     },
     gradeAnswer: base.gradeAnswer,
@@ -199,13 +200,18 @@ test("every turn names the review item it is testing, and formats stay varied", 
 
   const attempts = await db.query.attempts.findMany({
     where: eq(schema.attempts.sessionId, sessionId),
+    orderBy: [asc(schema.attempts.id)],
   });
 
-  expect(attempts).toHaveLength(10);
-  expect(attempts.every((attempt) => attempt.reviewItemId !== null)).toBe(true);
-  expect(attempts.every((attempt) => attempt.stage === "daily")).toBe(true);
+  const daily = attempts.filter((attempt) => attempt.stage === "daily");
+  expect(daily).toHaveLength(10);
+  expect(daily.every((attempt) => attempt.reviewItemId !== null)).toBe(true);
+  // The eleventh turn is the student's own account of the session.
+  expect(attempts).toHaveLength(11);
+  expect(attempts[10].stage).toBe("reflection");
+  expect(attempts[10].reviewItemId).toBeNull();
 
-  const formats = attempts.map((attempt) => attempt.format);
+  const formats = daily.map((attempt) => attempt.format);
   for (let index = 1; index < formats.length; index++) {
     expect(formats[index]).not.toBe(formats[index - 1]);
   }
@@ -213,6 +219,29 @@ test("every turn names the review item it is testing, and formats stay varied", 
     expect(formats.filter((f) => f === format).length).toBeLessThanOrEqual(2);
   }
 
+  await finishSession(sessionId, { deps: tutor });
+});
+
+test("the reflection turn is the eleventh and costs no question call", async () => {
+  const sessionId = await startDailySession();
+  const contexts: { bucket?: string }[] = [];
+  const tutor = recordingTutor(stubTutor([]), contexts);
+
+  for (let i = 0; i < 10; i++) {
+    const turn = await currentTurn(sessionId, tutor);
+    expect(turn?.stage).toBe("daily");
+    expect(turn?.total).toBe(11);
+    await submitAnswer(sessionId, "An answer.", tutor);
+  }
+
+  const reflection = await currentTurn(sessionId, tutor);
+  expect(reflection?.stage).toBe("reflection");
+  expect(reflection?.position).toBe(11);
+  expect(reflection?.question).toMatch(/hardest question/i);
+  expect(contexts).toHaveLength(10);
+
+  expect(await submitAnswer(sessionId, "I got the precursor wrong.", tutor)).toBeNull();
+  expect(await currentTurn(sessionId, tutor)).toBeNull();
   await finishSession(sessionId, { deps: tutor });
 });
 
@@ -267,6 +296,20 @@ test("finishing reschedules only the items actually asked", async () => {
   // strictly advances — a moved item cannot land back on its previous state.
   expect(changed).toEqual(asked);
   expect(after.length).toBeGreaterThan(changed.size);
+
+  // One outcome per item asked, each moved off "new" or "relearning" by a
+  // green, and the same array on the session row.
+  expect(result.outcomes).toHaveLength(10);
+  expect(new Set(result.outcomes.map((o) => o.reviewItemId))).toEqual(asked);
+  for (const outcome of result.outcomes) {
+    expect(outcome.rating).toBe("green");
+    expect(["consolidating", "mature"]).toContain(outcome.tierAfter);
+    expect(outcome.concept.length).toBeGreaterThan(0);
+  }
+  const stored = await db.query.sessions.findFirst({
+    where: eq(schema.sessions.id, sessionId),
+  });
+  expect(stored!.outcomes).toEqual(result.outcomes);
 });
 
 test("finishing writes a debrief onto the session", async () => {
@@ -314,4 +357,101 @@ test("a same-day session and a daily session on one date leave the worst rating"
   expect(studyDate).toBeDefined();
   expect(cells).toHaveLength(1);
   expect(cells[0].rating).toBe("red");
+});
+
+test("the reflection is handed to the debrief", async () => {
+  const sessionId = await startDailySession();
+  const base = stubTutor([]);
+  const requests: { reflection?: string | null }[] = [];
+  const tutor: TutorDeps = {
+    ...base,
+    summariseSession: async (request) => {
+      requests.push({ reflection: request.reflection });
+      return base.summariseSession(request);
+    },
+  };
+
+  for (let i = 0; i < 10; i++) {
+    await currentTurn(sessionId, tutor);
+    await submitAnswer(sessionId, "An answer.", tutor);
+  }
+  await currentTurn(sessionId, tutor);
+  await submitAnswer(sessionId, "Hardest: the precursor.", tutor);
+  await finishSession(sessionId, { deps: tutor });
+
+  expect(requests).toHaveLength(1);
+  expect(requests[0].reflection).toBe("Hardest: the precursor.");
+});
+
+test("every daily question carries the item's tier, and a red makes it relearning next time", async () => {
+  const first = await startDailySession();
+  const redTutor = stubTutor(Array(10).fill("red"));
+  await playThrough(first, redTutor);
+  await finishSession(first, { deps: redTutor });
+
+  const second = await startDailySession();
+  const contexts: { bucket?: string; tier?: string }[] = [];
+  const tutor = recordingTutor(stubTutor([]), contexts);
+  await playThrough(second, tutor);
+  await finishSession(second, { deps: tutor });
+
+  expect(contexts).toHaveLength(10);
+  expect(contexts.every((context) => context.tier !== undefined)).toBe(true);
+  // Ten reds make ten relearning items; the weak bucket alone surfaces two.
+  // Residual weak state from earlier tests cannot crowd them out: the ten
+  // reds carry lapses >= 1 and lastRating red, so under weakness() they
+  // outrank any item that is weak only through objective history — and the
+  // assertion is `some`, not `every`.
+  expect(contexts.some((context) => context.tier === "relearning")).toBe(true);
+});
+
+test("a plan frozen before tiers existed still explains its turns from the row", async () => {
+  // Plans written before Phase 4 carry no tier; explain() derives one from
+  // the item row instead of leaving the badge blank.
+  const item = await db.query.reviewItems.findFirst();
+  const objective = await db.query.learningObjectives.findFirst({
+    where: eq(schema.learningObjectives.id, item!.loId),
+  });
+  const [session] = await db
+    .insert(schema.sessions)
+    .values({
+      type: "daily",
+      plan: [
+        {
+          slot: 1,
+          bucket: "fill",
+          loId: objective!.id,
+          reviewItemId: item!.id,
+          companionItemIds: [],
+          formatFamily: FORMAT_FAMILY[item!.kind],
+        },
+      ],
+    })
+    .returning({ id: schema.sessions.id });
+
+  const tutor = stubTutor([]);
+  await currentTurn(session.id, tutor);
+  const feedback = await submitAnswer(session.id, "An answer.", tutor);
+
+  expect(feedback?.why?.tier).toBe(tierOf(item!));
+
+  await db.delete(schema.sessions).where(eq(schema.sessions.id, session.id));
+});
+
+test("the feedback explains the turn; the question does not", async () => {
+  const sessionId = await startDailySession();
+  const tutor = stubTutor([]);
+
+  const turn = await currentTurn(sessionId, tutor);
+  expect(turn).not.toHaveProperty("why");
+
+  const feedback = await submitAnswer(sessionId, "An answer.", tutor);
+  expect(feedback?.why).toBeDefined();
+  expect(["due", "weak", "recent", "interleaved", "fill"]).toContain(feedback!.why!.bucket);
+  expect(["new", "relearning", "consolidating", "mature"]).toContain(feedback!.why!.tier);
+  expect(feedback!.why!.dueOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(feedback!.why!.intervalDays).toBeGreaterThanOrEqual(0);
+
+  await playThrough(sessionId, tutor);
+  await finishSession(sessionId, { deps: tutor });
 });

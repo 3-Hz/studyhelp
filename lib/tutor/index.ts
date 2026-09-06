@@ -1,7 +1,8 @@
 import type { LanguageModel } from "ai";
-import type { SessionStage } from "@/lib/db/schema";
+import type { Rating, SessionStage } from "@/lib/db/schema";
 import { profileFor, type ModelProfile } from "@/lib/llm/config";
 import { generateStructured } from "@/lib/llm/structured";
+import type { Tier } from "@/lib/schedule";
 import type { Bucket } from "@/lib/session/select";
 import {
   DebriefOutput,
@@ -25,6 +26,18 @@ export interface ConceptContext {
   lectureTitle?: string;
 }
 
+/** The most recent graded attempt on a concept, from an earlier session. */
+export interface PriorAttempt {
+  daysAgo: number;
+  rating: Rating;
+  hintsUsed: boolean;
+  missing: string[];
+  incorrect: string[];
+  correction: string;
+  /** True when the attempt graded the whole objective, not this concept. */
+  aboutObjective: boolean;
+}
+
 export interface TurnContext {
   stage: SessionStage;
   lectureTitle: string;
@@ -42,6 +55,10 @@ export interface TurnContext {
    * interleaved, fill. Absent for same-day turns, which have no such notion.
    */
   bucket?: Bucket;
+  /** The item's mastery tier. Steers how demanding the question is. */
+  tier?: Tier;
+  /** What happened last time this concept was tested, if it was. */
+  lastAttempt?: PriorAttempt;
 }
 
 /**
@@ -64,45 +81,85 @@ function conceptLines(concepts: ConceptContext[]): string {
     .join("\n");
 }
 
+/** The stages the tutor is asked to compose. The reflection is fixed text owned by the runner. */
+type AskableStage = Exclude<SessionStage, "reflection">;
+
 /** Per-stage instruction, kept out of the system block so that stays cacheable. */
-const STAGE_BRIEF: Record<SessionStage, string> = {
+const STAGE_BRIEF: Record<AskableStage, string> = {
   lo_recall: `This is LO recall. Ask the student to tell you everything they can about this one objective, before any answer is shown. Let them recite, outline, or work step by step.`,
   summary: `This is the lecture summary. Ask the student to summarise the whole lecture from memory, without notes. Do not name the objectives — recalling what the lecture covered is part of the task.`,
   elaboration: `This is elaboration and reflection. Ask why or how, compare similar concepts, predict the consequence of a mechanism failing, connect to earlier material, or have the student explain the idea to a classmate or patient. Go beyond restating the objective.`,
   daily: `This is daily retrieval practice, mixing material from several lectures. Ask about the target concept named below and nothing else. The student has met this material before, so do not re-teach it — ask them to retrieve it. Where concepts from other lectures are listed, the question should make the student distinguish or connect them rather than recite either one.`,
 };
 
+/** A focused question, in steps: prompt.txt "Adaptive Difficulty" for new or weak material. */
+const FOCUSED_BRIEF =
+  "Ask a focused question about one part of this concept. Let the student work in steps. Do not combine it with other material.";
+
 /**
- * Why select() put this item in today's plan, turned into a one-sentence
- * steer on difficulty — never a rule the grading could be talked around,
- * since selection itself stays in code (prompt.txt "Adaptive Difficulty").
- * `interleaved` gets nothing here: the daily brief's cross-lecture framing
- * above already covers it, and repeating it would just be noise.
+ * How demanding the question should be, from the item's tier (prompt.txt
+ * "Adaptive Difficulty"). Kind decides the question's shape through the
+ * format family; tier decides its demand. Code sets the tier; the model
+ * shapes the question to it.
  */
-const BUCKET_HINT: Partial<Record<Bucket, string>> = {
-  due: "This item is owed for spaced review, so ask for the whole thing rather than a fragment.",
-  weak: "This has gone badly before, so ask a focused question and let the student reconstruct it in steps.",
-  recent: "This was taught recently, so a focused question is appropriate.",
+const TIER_BRIEF: Record<Tier, string> = {
+  new: FOCUSED_BRIEF,
+  relearning: `The student missed this last time. ${FOCUSED_BRIEF}`,
+  consolidating:
+    "The student has retrieved this before. Ask for the whole concept, unscaffolded; nothing in the wording should narrow it.",
+  mature:
+    "The student has retrieved this reliably across increasing intervals. Test it through application or discrimination in a context the lecture did not use, combine it with the related concepts listed, and where plausible alternatives exist ask why the wrong ones are wrong.",
 };
+
+/**
+ * Last time, as the model needs it: what was missed, what was wrong, the
+ * correction given — and a steer that depends on tier. Relearning targets the
+ * gap (prompt.txt: "target the missing component"); anything more mature
+ * tests the same point by another route rather than repeating the wording.
+ */
+function lastAttemptLines(last: PriorAttempt, tier: Tier | undefined): string {
+  const when =
+    last.daysAgo === 0 ? "earlier today" : last.daysAgo === 1 ? "yesterday" : `${last.daysAgo} days ago`;
+  const about = last.aboutObjective ? "on the objective as a whole" : "on this concept";
+  const steer =
+    tier === "new" || tier === "relearning"
+      ? "Target what was missed."
+      : "Do not repeat that wording: test the same point through a different route.";
+
+  return [
+    `Last attempt, ${when}, ${about}: rated ${last.rating}${last.hintsUsed ? " after a cue" : ""}.`,
+    last.missing.length ? `  Missed: ${last.missing.join("; ")}` : "",
+    last.incorrect.length ? `  Wrong: ${last.incorrect.join("; ")}` : "",
+    last.correction ? `  Correction given: ${last.correction}` : "",
+    steer,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 export async function askQuestion(
   context: TurnContext,
   options: TutorOptions = {},
 ): Promise<QuestionOutput> {
+  if (context.stage === "reflection") {
+    throw new Error("The reflection question is fixed text; the tutor never composes it.");
+  }
+
   const profile = options.profile ?? profileFor("tutor");
 
   const used = context.usedFormats?.length
     ? `\nFormats already used this session, which you should avoid repeating: ${context.usedFormats.join(", ")}.`
     : "";
 
-  const bucketHint =
-    context.stage === "daily" && context.bucket
-      ? BUCKET_HINT[context.bucket]
-      : undefined;
+  const tierBrief = context.tier ? TIER_BRIEF[context.tier] : "";
+  const lastAttempt = context.lastAttempt
+    ? lastAttemptLines(context.lastAttempt, context.tier)
+    : "";
 
   const prompt = [
     STAGE_BRIEF[context.stage],
-    bucketHint ?? "",
+    tierBrief,
+    lastAttempt,
     "",
     `Lecture: ${context.lectureTitle}`,
     context.objective ? `Objective: ${context.objective}` : "",
@@ -223,6 +280,8 @@ export interface DebriefRequest {
     missing: string[];
     incorrect: string[];
   }[];
+  /** The student's own account of the session, from the reflection turn. */
+  reflection?: string | null;
 }
 
 /**
@@ -234,6 +293,8 @@ export async function summariseSession(
   options: TutorOptions = {},
 ): Promise<DebriefOutput> {
   const profile = options.profile ?? profileFor("tutor");
+
+  const reflection = request.reflection?.trim();
 
   const prompt = [
     "Summarise this retrieval session for the student.",
@@ -249,6 +310,17 @@ export async function summariseSession(
         .filter(Boolean)
         .join("\n"),
     ),
+    ...(reflection
+      ? [
+          "",
+          "The student's own account of the session, in their words:",
+          reflection,
+          "",
+          "Compare it with the graded record above. Where they disagree — something",
+          "the student believes they know that the record says they missed, or the",
+          "reverse — say so in one sentence as `calibration`. Leave it empty if they agree.",
+        ]
+      : []),
   ].join("\n");
 
   const { value } = await generateStructured({

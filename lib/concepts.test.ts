@@ -1,0 +1,144 @@
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { rmSync } from "node:fs";
+import { eq } from "drizzle-orm";
+
+const TEST_DB = `./.test-concepts-${process.pid}.db`;
+process.env.DATABASE_URL = TEST_DB;
+
+const { db, schema } = await import("./db");
+const { commitLecture } = await import("./commitLecture");
+const { lectureConcepts } = await import("./concepts");
+const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
+
+const TODAY = "2026-09-04";
+
+const draft = {
+  title: "Amyloidosis",
+  learningObjectives: [
+    { text: "Describe the structure of amyloid fibrils.", slideRefs: [2] },
+    { text: "Compare AL and ATTR amyloidosis.", slideRefs: [5] },
+  ],
+  concepts: [
+    {
+      label: "Beta-pleated sheet",
+      detail: "Cross-beta conformation.",
+      kind: "fact" as const,
+      provenance: "taught" as const,
+      relatedObjectiveIndexes: [0],
+    },
+    {
+      label: "Congo red",
+      detail: "Apple-green birefringence.",
+      kind: "fact" as const,
+      provenance: "taught" as const,
+      relatedObjectiveIndexes: [0],
+    },
+    {
+      label: "AL vs ATTR precursor",
+      detail: "Light chains versus transthyretin.",
+      kind: "mechanism" as const,
+      provenance: "supplemental" as const,
+      relatedObjectiveIndexes: [1],
+    },
+  ],
+  commonConfusions: [],
+  conflicts: [],
+};
+
+let lectureId: number;
+let draftId: number;
+
+beforeAll(async () => {
+  migrate(db, { migrationsFolder: "./drizzle" });
+
+  const [lecture] = await db
+    .insert(schema.lectures)
+    .values({ title: draft.title, draftExtract: draft })
+    .returning({ id: schema.lectures.id });
+  lectureId = lecture.id;
+  await commitLecture(lectureId, [
+    { draftIndex: 0, text: draft.learningObjectives[0].text },
+    { draftIndex: 1, text: draft.learningObjectives[1].text },
+  ]);
+
+  const [uncommitted] = await db
+    .insert(schema.lectures)
+    .values({ title: "Draft only", draftExtract: draft })
+    .returning({ id: schema.lectures.id });
+  draftId = uncommitted.id;
+
+  const objectives = await db.query.learningObjectives.findMany({
+    where: eq(schema.learningObjectives.lectureId, lectureId),
+    orderBy: [schema.learningObjectives.orderIndex],
+  });
+  await db
+    .update(schema.learningObjectives)
+    .set({ suspended: true })
+    .where(eq(schema.learningObjectives.id, objectives[1].id));
+
+  const items = await db.query.reviewItems.findMany({
+    orderBy: [schema.reviewItems.id],
+  });
+  // Overdue and mature; due tomorrow and relearning; the third untouched.
+  await db
+    .update(schema.reviewItems)
+    .set({ dueOn: "2026-09-01", intervalDays: 14, lapses: 0, streak: 4, lastRating: "green" })
+    .where(eq(schema.reviewItems.id, items[0].id));
+  await db
+    .update(schema.reviewItems)
+    .set({ dueOn: "2026-09-05", intervalDays: 1, lapses: 2, streak: 0, lastRating: "red" })
+    .where(eq(schema.reviewItems.id, items[1].id));
+});
+
+afterAll(() => {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    rmSync(`${TEST_DB}${suffix}`, { force: true });
+  }
+});
+
+test("lists every objective in order with its items, suspended ones included", async () => {
+  const view = await lectureConcepts(lectureId, TODAY);
+
+  expect(view?.title).toBe("Amyloidosis");
+  expect(view?.committedAt).not.toBeNull();
+  expect(view?.objectives.map((o) => o.text)).toEqual([
+    "Describe the structure of amyloid fibrils.",
+    "Compare AL and ATTR amyloidosis.",
+  ]);
+  expect(view?.objectives[1].suspended).toBe(true);
+  expect(view?.objectives[0].items).toHaveLength(2);
+  expect(view?.objectives[1].items).toHaveLength(1);
+  expect(view?.objectives[1].items[0].provenance).toBe("supplemental");
+});
+
+test("each item carries its state, its tier, and a signed days-until-due", async () => {
+  const view = await lectureConcepts(lectureId, TODAY);
+  const [overdue, tomorrow] = view!.objectives[0].items;
+
+  expect(overdue).toMatchObject({
+    concept: "Beta-pleated sheet — Cross-beta conformation.",
+    kind: "fact",
+    tier: "mature",
+    intervalDays: 14,
+    lapses: 0,
+    streak: 4,
+    lastRating: "green",
+    dueOn: "2026-09-01",
+    dueIn: -3,
+  });
+  expect(tomorrow).toMatchObject({ tier: "relearning", lapses: 2, dueIn: 1 });
+
+  const untouched = view!.objectives[1].items[0];
+  expect(untouched.tier).toBe("new");
+  expect(untouched.dueIn).toBeGreaterThanOrEqual(0);
+});
+
+test("an uncommitted lecture has no objectives yet", async () => {
+  const view = await lectureConcepts(draftId, TODAY);
+  expect(view?.committedAt).toBeNull();
+  expect(view?.objectives).toEqual([]);
+});
+
+test("an unknown lecture is null", async () => {
+  expect(await lectureConcepts(9_999, TODAY)).toBeNull();
+});

@@ -86,6 +86,7 @@ test("a committed lecture contributes one candidate per review item, carrying it
       dueOn: "2026-09-10",
       intervalDays: 7,
       lapses: 2,
+      streak: 5,
       lastRating: "yellow",
     })
     .where(eq(schema.reviewItems.loId, objective!.id));
@@ -117,10 +118,10 @@ test("a committed lecture contributes one candidate per review item, carrying it
   expect(candidates).toHaveLength(1);
 
   // The assertion below compares values, not which column produced them, so it
-  // can only catch a swapped mapping while these five stay pairwise distinct.
+  // can only catch a swapped mapping while these six stay pairwise distinct.
   expect(
-    new Set([item!.id, objective!.id, lecture.id, 7, 2]).size,
-  ).toBe(5);
+    new Set([item!.id, objective!.id, lecture.id, 7, 2, 5]).size,
+  ).toBe(6);
 
   expect(candidates[0]).toEqual({
     reviewItemId: item!.id,
@@ -131,6 +132,7 @@ test("a committed lecture contributes one candidate per review item, carrying it
     dueOn: "2026-09-10",
     intervalDays: 7,
     lapses: 2,
+    streak: 5,
     lastRating: "yellow",
     loSuspended: false,
     lectureCommittedOn: "2026-08-20",
