@@ -86,6 +86,25 @@ export default function ReviewForm({
     (o) => o.kept && o.text.trim().length > 0,
   ).length;
 
+  // Concepts under the first objective each serves, as commit will file them;
+  // -1 collects concepts that name no objective. Draft order within a group
+  // is the lecture's order, which is what the numbering means.
+  const conceptGroups = (() => {
+    const groups = new Map<number, LectureExtract["concepts"]>();
+    for (const concept of draft.concepts) {
+      const draftIndex = concept.relatedObjectiveIndexes[0] ?? -1;
+      const list = groups.get(draftIndex) ?? [];
+      list.push(concept);
+      groups.set(draftIndex, list);
+    }
+    return [...groups.entries()]
+      .sort((a, b) => (a[0] === -1 ? 1 : b[0] === -1 ? -1 : a[0] - b[0]))
+      .map(([draftIndex, concepts]) => ({ draftIndex, concepts }));
+  })();
+
+  // Drafts extracted before Phase 5 carry no practice questions.
+  const practiceQuestions = draft.practiceQuestions ?? [];
+
   return (
     <div className="mt-8 space-y-10">
       <section>
@@ -166,35 +185,79 @@ export default function ReviewForm({
           Concepts to be scheduled ({draft.concepts.length})
         </h2>
         <p className="mt-1 text-xs text-stone-500">
-          These become internal review items, not dashboard rows. Anything
-          marked <em>supplemental</em> is outside the lecture materials.
+          Numbered under the objective each serves, in the order the lecture
+          presented them — the numbers a session marks. Anything marked{" "}
+          <em>supplemental</em> is outside the lecture materials.
         </p>
-        <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-          {draft.concepts.map((concept, index) => (
-            <li
-              key={index}
-              className="rounded-md border border-stone-200 p-3 text-sm dark:border-stone-800"
-            >
-              <div className="flex items-center gap-2">
-                <span className="font-medium">{concept.label}</span>
-                <span
-                  className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
-                    PROVENANCE_STYLE[concept.provenance] ?? ""
-                  }`}
+        {conceptGroups.map((group) => (
+          <div key={group.draftIndex} className="mt-4">
+            <h3 className="text-xs font-medium text-stone-600 dark:text-stone-400">
+              {group.draftIndex === -1
+                ? "Not tied to an objective — these will not be scheduled"
+                : objectives[group.draftIndex]?.text || `Objective ${group.draftIndex + 1}`}
+              <span className="ml-2 text-stone-400">
+                {group.concepts.length} concept{group.concepts.length === 1 ? "" : "s"}
+              </span>
+            </h3>
+            <ol className="mt-2 grid gap-2 sm:grid-cols-2">
+              {group.concepts.map((concept, index) => (
+                <li
+                  key={index}
+                  className="rounded-md border border-stone-200 p-3 text-sm dark:border-stone-800"
                 >
-                  {concept.provenance}
-                </span>
-                <span className="text-[10px] uppercase tracking-wide text-stone-400">
-                  {concept.kind}
-                </span>
-              </div>
-              <p className="mt-1 text-stone-600 dark:text-stone-400">
-                {concept.detail}
-              </p>
-            </li>
-          ))}
-        </ul>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-stone-400">{index + 1}.</span>
+                    <span className="font-medium">{concept.label}</span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
+                        PROVENANCE_STYLE[concept.provenance] ?? ""
+                      }`}
+                    >
+                      {concept.provenance}
+                    </span>
+                    <span className="text-[10px] uppercase tracking-wide text-stone-400">
+                      {concept.kind}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-stone-600 dark:text-stone-400">
+                    {concept.detail}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ))}
       </section>
+
+      {practiceQuestions.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-500">
+            Practice questions the lecture poses ({practiceQuestions.length})
+          </h2>
+          <p className="mt-1 text-xs text-stone-500">
+            Kept with the lecture. A session prefers one of these when it fits
+            the concept being tested.
+          </p>
+          <ul className="mt-4 space-y-2">
+            {practiceQuestions.map((item, index) => (
+              <li
+                key={index}
+                className="rounded-md border border-stone-200 p-3 text-sm dark:border-stone-800"
+              >
+                <p className="font-medium">{item.question}</p>
+                <p className="mt-1 text-stone-600 dark:text-stone-400">
+                  {item.answer || "(no answer given in the materials)"}
+                </p>
+                {item.slideRefs.length > 0 && (
+                  <p className="mt-1 text-[10px] uppercase tracking-wide text-stone-400">
+                    Slide{item.slideRefs.length > 1 ? "s" : ""} {item.slideRefs.join(", ")}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {draft.conflicts.length > 0 && (
         <section>

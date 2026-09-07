@@ -1,11 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { MARK_STYLE, SUSPENDED_STYLE } from "@/app/components/scores";
+import { MARK_LABEL, MARK_STYLE, SUSPENDED_STYLE } from "@/app/components/scores";
 import { lectureConcepts, type ConceptRow } from "@/lib/concepts";
 
 export const dynamic = "force-dynamic";
-
-const SWATCH = { ...MARK_STYLE, suspended: SUSPENDED_STYLE };
 
 function dueLabel(dueIn: number): string {
   if (dueIn < 0) return `overdue ${-dueIn}d`;
@@ -44,8 +42,18 @@ export default async function ConceptsPage({
     <div>
       <h1 className="text-2xl font-semibold tracking-tight">{view.title}</h1>
       <p className="mt-1 text-sm text-stone-500">
-        Every concept the scheduler tracks under each objective, and where it stands.
+        The LO Map: every concept under each objective, numbered, with where
+        it stands and how it was marked on each day it was tested.
       </p>
+
+      <div className="mt-4 flex flex-wrap gap-4 text-xs text-stone-600 dark:text-stone-400">
+        {(["green", "yellow", "red"] as const).map((mark) => (
+          <span key={mark} className="flex items-center gap-1.5">
+            <span className={`inline-block h-3 w-3 rounded-sm ${MARK_STYLE[mark]}`} />
+            {MARK_LABEL[mark]}
+          </span>
+        ))}
+      </div>
 
       {view.objectives.map((objective) => (
         <section key={objective.id} className="mt-8">
@@ -57,13 +65,14 @@ export default async function ConceptsPage({
             {objective.suspended && (
               <span
                 title="Suspended — not quizzed until reactivated"
-                className={`mr-2 inline-block h-2.5 w-2.5 rounded-sm ${SWATCH.suspended} align-middle`}
+                className={`mr-2 inline-block h-2.5 w-2.5 rounded-sm ${SUSPENDED_STYLE} align-middle`}
               />
             )}
             {objective.text}
-            {objective.suspended && (
-              <span className="ml-2 text-xs font-normal text-stone-400">not in play</span>
-            )}
+            <span className="ml-2 text-xs font-normal text-stone-400">
+              {objective.items.length} concept{objective.items.length === 1 ? "" : "s"}
+              {objective.suspended && " · not in play"}
+            </span>
           </h2>
 
           {objective.items.length === 0 ? (
@@ -73,6 +82,7 @@ export default async function ConceptsPage({
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="text-left text-xs text-stone-500">
+                    <th className="px-3 py-2 font-medium">#</th>
                     <th className="px-3 py-2 font-medium">Concept</th>
                     <th className="px-3 py-2 font-medium">Kind</th>
                     <th className="px-3 py-2 font-medium">Tier</th>
@@ -80,11 +90,19 @@ export default async function ConceptsPage({
                     <th className="px-3 py-2 font-medium">Interval</th>
                     <th className="px-3 py-2 font-medium">Lapses / streak</th>
                     <th className="px-3 py-2 font-medium">Due</th>
+                    {view.dates.map((date) => (
+                      <th
+                        key={date}
+                        className="border-l border-stone-200 px-2 py-2 text-center font-medium whitespace-nowrap dark:border-stone-800"
+                      >
+                        {date.slice(5)}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {objective.items.map((item) => (
-                    <ConceptLine key={item.id} item={item} />
+                    <ConceptLine key={item.id} item={item} dates={view.dates} />
                   ))}
                 </tbody>
               </table>
@@ -96,9 +114,12 @@ export default async function ConceptsPage({
   );
 }
 
-function ConceptLine({ item }: { item: ConceptRow }) {
+function ConceptLine({ item, dates }: { item: ConceptRow; dates: string[] }) {
   return (
     <tr className="border-t border-stone-200 dark:border-stone-800">
+      <td className="px-3 py-2 font-mono text-xs text-stone-400">
+        {item.ordinal > 0 ? item.ordinal : "—"}
+      </td>
       <td className="px-3 py-2">
         {item.concept}
         {item.provenance !== "taught" && (
@@ -110,8 +131,8 @@ function ConceptLine({ item }: { item: ConceptRow }) {
       <td className="px-3 py-2">
         {item.lastRating ? (
           <span
-            title={item.lastRating}
-            className={`inline-block h-4 w-4 rounded-sm ${SWATCH[item.lastRating]}`}
+            title={MARK_LABEL[item.lastRating]}
+            className={`inline-block h-4 w-4 rounded-sm ${MARK_STYLE[item.lastRating]}`}
           />
         ) : (
           <span className="text-stone-400">—</span>
@@ -127,6 +148,24 @@ function ConceptLine({ item }: { item: ConceptRow }) {
           ({dueLabel(item.dueIn)})
         </span>
       </td>
+      {dates.map((date) => {
+        const mark = item.marks[date];
+        return (
+          <td
+            key={date}
+            className="border-l border-stone-200 px-2 py-2 text-center dark:border-stone-800"
+          >
+            {mark ? (
+              <span
+                title={`${date}: ${MARK_LABEL[mark]}`}
+                className={`inline-block h-4 w-4 rounded-sm ${MARK_STYLE[mark]}`}
+              />
+            ) : (
+              <span className="sr-only">not tested</span>
+            )}
+          </td>
+        );
+      })}
     </tr>
   );
 }

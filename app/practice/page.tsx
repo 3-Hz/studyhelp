@@ -76,9 +76,13 @@ export default async function PracticePage() {
           )}
 
           <p className="mt-3 text-sm text-stone-600 dark:text-stone-400">
-            Ten questions: four due for review, two weak, two from recent
-            material, and two that cross lectures. Nothing due yet is practised
-            early rather than skipped.
+            Pick how long you have. Twenty minutes is ten questions on five
+            objectives, two each; longer goes deeper, shorter goes wider.
+            Objectives due for review come first, then weak spots, recent
+            material, and one from another lecture, switching lectures as it
+            goes. Each question is first-, second- or third-order by how the
+            objective went last time. Nothing due yet is practised early
+            rather than skipped.
           </p>
 
           <StartDailyButton resuming={open !== undefined} />
@@ -87,7 +91,7 @@ export default async function PracticePage() {
             <p className="mt-6 text-xs text-stone-500">
               {finished.length} session{finished.length === 1 ? "" : "s"} already
               finished today. Another is fine — today&rsquo;s dashboard cell keeps
-              the worst rating of them all.
+              the lowest score of them all.
             </p>
           )}
         </>

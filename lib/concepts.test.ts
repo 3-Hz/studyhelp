@@ -133,6 +133,38 @@ test("each item carries its state, its tier, and a signed days-until-due", async
   expect(untouched.dueIn).toBeGreaterThanOrEqual(0);
 });
 
+test("each item is numbered within its objective", async () => {
+  const view = await lectureConcepts(lectureId, TODAY);
+  expect(view!.objectives[0].items.map((item) => item.ordinal)).toEqual([1, 2]);
+  expect(view!.objectives[1].items.map((item) => item.ordinal)).toEqual([1]);
+});
+
+test("each item carries its marks by date, and the lecture lists the dates it was marked on", async () => {
+  const items = await db.query.reviewItems.findMany({ orderBy: [schema.reviewItems.id] });
+  const [first] = await db
+    .insert(schema.studyDates)
+    .values({ date: "2026-09-01" })
+    .returning({ id: schema.studyDates.id });
+  const [third] = await db
+    .insert(schema.studyDates)
+    .values({ date: "2026-09-03" })
+    .returning({ id: schema.studyDates.id });
+  await db.insert(schema.conceptMarks).values([
+    { reviewItemId: items[0].id, studyDateId: third.id, mark: "red" },
+    { reviewItemId: items[0].id, studyDateId: first.id, mark: "green" },
+    { reviewItemId: items[1].id, studyDateId: third.id, mark: "yellow" },
+  ]);
+
+  const view = await lectureConcepts(lectureId, TODAY);
+
+  expect(view!.dates).toEqual(["2026-09-01", "2026-09-03"]);
+  const [sheet, congoRed] = view!.objectives[0].items;
+  expect(sheet.marks).toEqual({ "2026-09-01": "green", "2026-09-03": "red" });
+  expect(congoRed.marks).toEqual({ "2026-09-03": "yellow" });
+  // Never tested: no marks, and nothing invented for the dates others were tested on.
+  expect(view!.objectives[1].items[0].marks).toEqual({});
+});
+
 test("an uncommitted lecture has no objectives yet", async () => {
   const view = await lectureConcepts(draftId, TODAY);
   expect(view?.committedAt).toBeNull();
