@@ -12,6 +12,7 @@ const truth: GroundTruth = {
   taughtConcepts: ["cross-beta sheet"],
   supplementalTraps: ["tafamidis"],
   notesOnlyFacts: ["0.26 to 1.65"],
+  practiceQuestions: ["Which stain confirms amyloid on the biopsy?"],
 };
 
 function extract(partial: Partial<LectureExtract>): LectureExtract {
@@ -19,11 +20,46 @@ function extract(partial: Partial<LectureExtract>): LectureExtract {
     title: "Systemic Amyloidosis",
     learningObjectives: [],
     concepts: [],
+    practiceQuestions: [],
     commonConfusions: [],
     conflicts: [],
     ...partial,
   };
 }
+
+test("counts the deck's practice questions the model found, allowing for close wording", () => {
+  const score = scoreExtract(
+    extract({
+      practiceQuestions: [
+        {
+          question: "Test yourself: which stain confirms amyloid on the biopsy?",
+          answer: "Congo red.",
+          slideRefs: [8],
+          relatedObjectiveIndexes: [],
+        },
+      ],
+    }),
+    truth,
+  );
+  expect(score.practiceQuestionsFound).toEqual(truth.practiceQuestions);
+});
+
+test("a practice question the model composed itself is not one it found", () => {
+  const score = scoreExtract(
+    extract({
+      practiceQuestions: [
+        {
+          question: "What is the precursor in AL amyloidosis?",
+          answer: "Light chains.",
+          slideRefs: [],
+          relatedObjectiveIndexes: [],
+        },
+      ],
+    }),
+    truth,
+  );
+  expect(score.practiceQuestionsFound).toEqual([]);
+});
 
 function objectives(...texts: string[]) {
   return texts.map((text) => ({ text, slideRefs: [] }));

@@ -87,6 +87,16 @@ test("notes-only facts are absent from every slide body", () => {
   }
 });
 
+test("the deck poses each practice question on a slide, with the answer only in its notes", () => {
+  expect(groundTruth.practiceQuestions.length).toBeGreaterThan(0);
+  for (const question of groundTruth.practiceQuestions) {
+    const slide = slides.find((s) => s.slideText.includes(question));
+    expect(slide).toBeDefined();
+    expect(slide!.notesText).toContain("Answer:");
+    expect(slide!.slideText).not.toContain("Answer:");
+  }
+});
+
 test("exactly one mid-deck slide has no presenter notes", () => {
   const withoutNotes = slides.filter((s) => s.notesText === "");
   expect(withoutNotes).toHaveLength(1);

@@ -7,11 +7,59 @@ function extract(partial: Partial<LectureExtract>): LectureExtract {
     title: "",
     learningObjectives: [],
     concepts: [],
+    practiceQuestions: [],
     commonConfusions: [],
     conflicts: [],
     ...partial,
   };
 }
+
+test("unions practice questions across chunks, deduped on the question", () => {
+  const merged = mergeExtracts([
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [1] }],
+      practiceQuestions: [
+        {
+          question: "Which stain confirms amyloid?",
+          answer: "Congo red.",
+          slideRefs: [8],
+          relatedObjectiveIndexes: [0],
+        },
+      ],
+    }),
+    extract({
+      learningObjectives: [{ text: "Objective B", slideRefs: [12] }],
+      practiceQuestions: [
+        // The same question, seen again on a recap slide in the next chunk.
+        {
+          question: "which stain confirms amyloid",
+          answer: "Congo red, with apple-green birefringence.",
+          slideRefs: [20],
+          relatedObjectiveIndexes: [0],
+        },
+        {
+          question: "What is the normal free light chain ratio?",
+          answer: "0.26 to 1.65.",
+          slideRefs: [21],
+          relatedObjectiveIndexes: [0],
+        },
+      ],
+    }),
+  ]);
+
+  expect(merged.practiceQuestions).toHaveLength(2);
+  // First wording and answer survive; slide references and objective links union.
+  expect(merged.practiceQuestions[0].question).toBe("Which stain confirms amyloid?");
+  expect(merged.practiceQuestions[0].answer).toBe("Congo red.");
+  expect(merged.practiceQuestions[0].slideRefs).toEqual([8, 20]);
+  expect(merged.practiceQuestions[0].relatedObjectiveIndexes).toEqual([0, 1]);
+  // The second chunk's local objective 0 is merged objective 1.
+  expect(merged.practiceQuestions[1].relatedObjectiveIndexes).toEqual([1]);
+});
+
+test("an empty merge carries no practice questions", () => {
+  expect(mergeExtracts([]).practiceQuestions).toEqual([]);
+});
 
 test("returns the single part untouched", () => {
   const only = extract({ title: "Amyloidosis" });

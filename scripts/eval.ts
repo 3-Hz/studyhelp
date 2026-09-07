@@ -207,7 +207,8 @@ function report(outcomes: Outcome[]): void {
     }
     console.log(
       `   Concepts: ${s.conceptCount} · notes-only facts found: ` +
-        `${s.notesFactsFound.length}/${groundTruth.notesOnlyFacts.length} · repairs: ${outcome.repairs}`,
+        `${s.notesFactsFound.length}/${groundTruth.notesOnlyFacts.length} · practice questions found: ` +
+        `${s.practiceQuestionsFound.length}/${groundTruth.practiceQuestions.length} · repairs: ${outcome.repairs}`,
     );
   }
 }

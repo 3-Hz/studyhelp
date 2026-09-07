@@ -31,6 +31,12 @@ export interface GroundTruth {
   supplementalTraps: string[];
   /** Facts stated ONLY in presenter notes — tests that notes are being read. */
   notesOnlyFacts: string[];
+  /**
+   * Questions the deck itself puts to students, answered only in the notes.
+   * A model that records these read the slide as a question rather than as
+   * content, and read the notes for the answer.
+   */
+  practiceQuestions: string[];
 }
 
 export const groundTruth: GroundTruth = {
@@ -54,6 +60,9 @@ export const groundTruth: GroundTruth = {
     "abdominal fat pad aspirate",
     "10% of cardiac amyloid cases",
     "0.26 to 1.65",
+  ],
+  practiceQuestions: [
+    "Which stain confirms amyloid on the biopsy, and what do you see under polarised light?",
   ],
 };
 
@@ -294,6 +303,17 @@ function slides(): SlideSpec[] {
       body: ["Congo red staining", "The confirmatory histological test"],
       notes:
         "Under polarised light, Congo red stained deposits show apple-green birefringence. An abdominal fat pad aspirate is the usual first-line sampling site because it is low risk.",
+    },
+
+    // 8 — a question the deck itself poses; the answer lives only in the notes
+    {
+      body: [
+        "Test yourself",
+        "A 68-year-old man has heart failure with thickened ventricular walls and low ECG voltage. " +
+          groundTruth.practiceQuestions[0],
+      ],
+      notes:
+        "Answer: Congo red, showing apple-green birefringence under polarised light. Take answers from the room before revealing it, and use the voltage–mass discordance to motivate the biopsy.",
     },
 
     ...fillerSlides(),

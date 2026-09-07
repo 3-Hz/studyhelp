@@ -48,6 +48,20 @@ const draft = {
       relatedObjectiveIndexes: [1],
     },
   ],
+  practiceQuestions: [
+    {
+      question: "Which stain confirms amyloid, and what do you see under polarised light?",
+      answer: "Congo red; apple-green birefringence.",
+      slideRefs: [8],
+      relatedObjectiveIndexes: [2],
+    },
+    {
+      question: "Name the precursor protein in AL amyloidosis.",
+      answer: "Immunoglobulin light chain.",
+      slideRefs: [5],
+      relatedObjectiveIndexes: [1],
+    },
+  ],
   commonConfusions: ["AL vs ATTR precursor proteins"],
   conflicts: [],
 };
@@ -186,4 +200,55 @@ test("review items start due today at interval zero", async () => {
 
   expect(items[0].dueOn).toBe(todayIso());
   expect(items[0].intervalDays).toBe(0);
+});
+
+test("numbers each objective's review items from one, in draft order", async () => {
+  const lectureId = await seedLecture();
+  await commitLecture(lectureId, [
+    { draftIndex: 0, text: draft.learningObjectives[0].text },
+    { draftIndex: 1, text: draft.learningObjectives[1].text },
+    { draftIndex: 2, text: draft.learningObjectives[2].text },
+  ]);
+
+  const objectives = await db.query.learningObjectives.findMany({
+    where: eq(schema.learningObjectives.lectureId, lectureId),
+  });
+  // Objective 1 owns two concepts (AL vs ATTR, then Tafamidis); the others one each.
+  const underSecond = await db.query.reviewItems.findMany({
+    where: eq(schema.reviewItems.loId, objectives[1].id),
+  });
+  expect(underSecond.map((item) => [item.ordinal, item.concept.split(" — ")[0]])).toEqual([
+    [1, "AL vs ATTR precursor"],
+    [2, "Tafamidis"],
+  ]);
+
+  const underThird = await db.query.reviewItems.findMany({
+    where: eq(schema.reviewItems.loId, objectives[2].id),
+  });
+  expect(underThird.map((item) => item.ordinal)).toEqual([1]);
+});
+
+test("keeps the lecture's practice questions, attached to their objective when it survives", async () => {
+  const lectureId = await seedLecture();
+  // Objective 2 (Congo red) is dropped; the question about it stays with the lecture.
+  const result = await commitLecture(lectureId, [
+    { draftIndex: 0, text: draft.learningObjectives[0].text },
+    { draftIndex: 1, text: draft.learningObjectives[1].text },
+  ]);
+
+  expect(result.practiceQuestionsCreated).toBe(2);
+
+  const objectives = await db.query.learningObjectives.findMany({
+    where: eq(schema.learningObjectives.lectureId, lectureId),
+  });
+  const questions = await db.query.practiceQuestions.findMany({
+    where: eq(schema.practiceQuestions.lectureId, lectureId),
+  });
+
+  const congoRed = questions.find((q) => q.question.startsWith("Which stain"));
+  const precursor = questions.find((q) => q.question.startsWith("Name the precursor"));
+  expect(congoRed?.loId).toBeNull();
+  expect(congoRed?.answer).toBe("Congo red; apple-green birefringence.");
+  expect(congoRed?.slideRefs).toEqual([8]);
+  expect(precursor?.loId).toBe(objectives[1].id);
 });

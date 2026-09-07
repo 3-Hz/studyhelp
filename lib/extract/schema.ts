@@ -33,7 +33,15 @@ export const LectureExtract = z.object({
         detail: z
           .string()
           .describe("One or two sentences a question could be built from."),
-        kind: z.enum(["fact", "mechanism", "application"]),
+        kind: z
+          .enum(["fact", "mechanism", "relationship", "distinction", "application"])
+          .describe(
+            "fact = a term, definition or stated fact; mechanism = how " +
+              "something works or happens; relationship = how two things " +
+              "depend on or affect each other; distinction = what separates " +
+              "two things students confuse; application = clinical use or " +
+              "reasoning.",
+          ),
         provenance: z
           .enum(["taught", "derived", "supplemental"])
           .describe(
@@ -46,7 +54,37 @@ export const LectureExtract = z.object({
           .describe("Indexes into learningObjectives (0-based)."),
       }),
     )
-    .describe("High-yield concepts, mechanisms, comparisons and pathways."),
+    .describe(
+      "Every independently testable idea as its own concept — terms, " +
+        "mechanisms, relationships, distinctions, clinical applications — in " +
+        "the order the lecture presents them, each linked to the objectives " +
+        "it serves.",
+    ),
+  practiceQuestions: z
+    .array(
+      z.object({
+        question: z
+          .string()
+          .describe(
+            "A question the lecture itself puts to students — a quiz slide, " +
+              "'test yourself', a clicker question, a case prompt — copied closely.",
+          ),
+        answer: z
+          .string()
+          .describe(
+            "The answer the materials give, from the presenter notes or the " +
+              "following slide. Empty only if the materials give none.",
+          ),
+        slideRefs: z.array(z.number()).describe("Slide numbers where it is posed."),
+        relatedObjectiveIndexes: z
+          .array(z.number())
+          .describe("Indexes into learningObjectives (0-based)."),
+      }),
+    )
+    .describe(
+      "Questions the lecture poses to students, with the answers the " +
+        "materials supply. Empty if it poses none — do not compose your own.",
+    ),
   commonConfusions: z
     .array(z.string())
     .describe("Pairs or sets of ideas students routinely mix up."),
@@ -68,9 +106,11 @@ export const EXTRACTION_SYSTEM = `You process medical school lecture materials f
 
 You will receive slides, presenter notes, transcripts, and figures for a single lecture.
 
-Identify every explicitly stated Learning Objective and preserve its wording closely. Copy each objective verbatim. Do not split one objective into several unless the lecture itself lists them separately, and do not merge separate objectives into one. If the lecture states no objectives, return an empty list rather than composing your own.
+Identify every explicitly stated Learning Objective and preserve its wording closely. Objectives are usually listed on a slide titled "Learning Objectives", "Objectives", "Session Learning Objectives" or similar, near the start of the deck; take them from there. Copy each objective verbatim. Do not split one objective into several unless the lecture itself lists them separately, and do not merge separate objectives into one. If the lecture states no objectives, return an empty list rather than composing your own.
 
-Then identify the major topics, high-yield concepts, mechanisms, comparisons, diagrams, pathways, clinical correlations, precise terminology, likely testable details, connections to prior knowledge, and common confusions.
+Then, for each objective, find the lecture content that satisfies it: the concepts, mechanisms, relationships, distinctions, and clinical applications a student needs. Record every independently testable idea as its own concept, in the order the lecture presents it, linked to the objectives it serves. Along the way, cover the major topics, high-yield concepts, comparisons, diagrams, pathways, clinical correlations, precise terminology, likely testable details, connections to prior knowledge, and common confusions.
+
+Where the lecture puts questions to students — quiz slides, "test yourself", clicker questions, case prompts — record each with the answer the materials give, from the presenter notes or the following slide. Do not compose questions of your own.
 
 Label every concept by provenance, and be strict about it:
 - "taught" — stated in the slides or presenter notes

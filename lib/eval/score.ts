@@ -25,6 +25,8 @@ export interface Score {
   provenanceErrors: string[];
   /** Notes-only facts that surfaced, i.e. presenter notes were actually read. */
   notesFactsFound: string[];
+  /** The deck's own practice questions the model recorded, allowing close wording. */
+  practiceQuestionsFound: string[];
   conceptCount: number;
 }
 
@@ -88,6 +90,16 @@ export function scoreExtract(
     haystack.includes(fact.toLowerCase()),
   );
 
+  // "Copied closely" allows a lead-in like "Test yourself:" either side, so a
+  // question counts when one normalised text contains the other.
+  const producedQuestions = extract.practiceQuestions
+    .map((item) => normaliseKey(item.question))
+    .filter((key) => key.length > 0);
+  const practiceQuestionsFound = truth.practiceQuestions.filter((expected) => {
+    const key = normaliseKey(expected);
+    return producedQuestions.some((got) => got.includes(key) || key.includes(got));
+  });
+
   return {
     exact,
     paraphrased,
@@ -95,6 +107,7 @@ export function scoreExtract(
     hallucinated,
     provenanceErrors,
     notesFactsFound,
+    practiceQuestionsFound,
     conceptCount: extract.concepts.length,
   };
 }

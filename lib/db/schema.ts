@@ -44,7 +44,18 @@ export type Score = (typeof SCORES)[number];
 export const PROVENANCE = ["taught", "derived", "supplemental"] as const;
 export type Provenance = (typeof PROVENANCE)[number];
 
-export const REVIEW_KINDS = ["fact", "mechanism", "application"] as const;
+/**
+ * What a concept is, which decides the shape of question it gets. The five
+ * kinds of idea new_prompt.txt counts: terms and facts, mechanisms,
+ * relationships, distinctions, clinical applications.
+ */
+export const REVIEW_KINDS = [
+  "fact",
+  "mechanism",
+  "relationship",
+  "distinction",
+  "application",
+] as const;
 export type ReviewKind = (typeof REVIEW_KINDS)[number];
 
 /**

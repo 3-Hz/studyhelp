@@ -57,6 +57,8 @@ export interface PlannedSlot {
 export const FORMAT_FAMILY: Record<ReviewKind, QuestionFormat[]> = {
   fact: ["free_recall", "short_answer", "error_correction"],
   mechanism: ["mechanism", "pathway", "consequence"],
+  relationship: ["mechanism", "comparison", "consequence"],
+  distinction: ["discrimination", "comparison", "error_correction"],
   application: ["vignette", "patient_teaching", "discrimination"],
 };
 

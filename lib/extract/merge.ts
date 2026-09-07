@@ -29,6 +29,7 @@ export function mergeExtracts(parts: LectureExtract[]): LectureExtract {
       title: "",
       learningObjectives: [],
       concepts: [],
+      practiceQuestions: [],
       commonConfusions: [],
       conflicts: [],
     };
@@ -103,10 +104,50 @@ export function mergeExtracts(parts: LectureExtract[]): LectureExtract {
     }
   });
 
+  // Practice questions: dedupe on the question — a recap slide repeats it —
+  // keeping the first wording and answer, unioning the rest.
+  const questionIndexByKey = new Map<string, number>();
+  const practiceQuestions: LectureExtract["practiceQuestions"] = [];
+
+  parts.forEach((part, chunkIndex) => {
+    const map = indexMaps[chunkIndex];
+    for (const item of part.practiceQuestions) {
+      const key = normaliseKey(item.question);
+      if (key.length === 0) continue;
+
+      const remapped = unique(
+        item.relatedObjectiveIndexes
+          .map((local) => map.get(local))
+          .filter((i): i is number => i !== undefined),
+      ).sort((a, b) => a - b);
+
+      const existing = questionIndexByKey.get(key);
+      if (existing !== undefined) {
+        const merged = practiceQuestions[existing];
+        merged.slideRefs = unique([...merged.slideRefs, ...item.slideRefs]).sort(
+          (a, b) => a - b,
+        );
+        merged.relatedObjectiveIndexes = unique([
+          ...merged.relatedObjectiveIndexes,
+          ...remapped,
+        ]).sort((a, b) => a - b);
+        continue;
+      }
+
+      questionIndexByKey.set(key, practiceQuestions.length);
+      practiceQuestions.push({
+        ...item,
+        slideRefs: unique(item.slideRefs).sort((a, b) => a - b),
+        relatedObjectiveIndexes: remapped,
+      });
+    }
+  });
+
   return {
     title,
     learningObjectives,
     concepts,
+    practiceQuestions,
     commonConfusions: dedupeStrings(parts.flatMap((p) => p.commonConfusions)),
     conflicts: dedupeStrings(parts.flatMap((p) => p.conflicts)),
   };
