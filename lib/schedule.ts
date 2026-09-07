@@ -1,4 +1,4 @@
-import type { Rating } from "@/lib/db/schema";
+import type { Mark, Rating, Score } from "@/lib/db/schema";
 
 /**
  * Deterministic spaced repetition, per prompt.txt "Spaced-Repetition
@@ -86,6 +86,52 @@ export function daysBetween(from: string, to: string): number {
 export function capRating(rating: Rating, hintsUsed: boolean): Rating {
   if (hintsUsed && rating === "green") return "yellow";
   return rating;
+}
+
+/**
+ * A score folded onto a mark. 5 is green; 4 — "correct with help, or mostly
+ * correct" — is yellow; 3 and below are red, because the rubric's 3 includes
+ * "a big mistake", and a big mistake is what red has always meant here.
+ *
+ * One function for three uses: the dashboard cell's colour, the objective's
+ * question order, and the mark a target concept falls back to when the
+ * grader did not mark it.
+ */
+export function band(score: Score): Mark {
+  if (score === 5) return "green";
+  if (score === 4) return "yellow";
+  return "red";
+}
+
+/**
+ * How demanding the next question on an objective should be, from its latest
+ * score (new_prompt.txt "Repetition Quiz Session"): first-order on recent
+ * poor performance, second on neutral, third on good. Never scored counts as
+ * poor: nothing is known yet.
+ */
+export const QUESTION_ORDERS = ["first", "second", "third"] as const;
+export type QuestionOrder = (typeof QUESTION_ORDERS)[number];
+
+export function orderFor(latestScore: Score | null): QuestionOrder {
+  if (latestScore === null) return "first";
+  if (latestScore <= 3) return "first";
+  if (latestScore === 4) return "second";
+  return "third";
+}
+
+/**
+ * "Correct with help" is a 4 by the rubric, so a cue turns a 5 into a 4 and
+ * touches nothing else. In code, not the prompt, for the reason capRating is.
+ */
+export function capScore(score: Score, hintsUsed: boolean): Score {
+  if (hintsUsed && score === 5) return 4;
+  return score;
+}
+
+/** The mark-level twin of capScore: hinted recall of a concept is not green. */
+export function capMark(mark: Mark, hintsUsed: boolean): Mark {
+  if (hintsUsed && mark === "green") return "yellow";
+  return mark;
 }
 
 /** The next rung strictly above the current interval; doubling past the top. */
@@ -221,4 +267,34 @@ export function worstByLo(
     if (rating) worst.set(loId, rating);
   }
   return worst;
+}
+
+/** Mark severity, worst first. */
+const MARK_SEVERITY: Mark[] = ["red", "yellow", "green"];
+
+/**
+ * The mark that represents a concept across one sitting: the worst one, for
+ * the reason worstRating gives.
+ */
+export function worstMark(marks: Mark[]): Mark | undefined {
+  return MARK_SEVERITY.find((mark) => marks.includes(mark));
+}
+
+/**
+ * The score that represents each objective across a set of turns: the lowest
+ * one. A 5 that follows a 2 in the same sitting is recall of the correction
+ * just given, and the dashboard cell has to describe the day honestly.
+ */
+export function minScoreByLo(
+  turns: { loId: number | null; score: Score | null }[],
+): Map<number, Score> {
+  const lowest = new Map<number, Score>();
+  for (const turn of turns) {
+    if (turn.score === null || turn.loId === null) continue;
+    const current = lowest.get(turn.loId);
+    if (current === undefined || turn.score < current) {
+      lowest.set(turn.loId, turn.score);
+    }
+  }
+  return lowest;
 }

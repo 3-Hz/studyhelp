@@ -1,15 +1,21 @@
 import { expect, test } from "bun:test";
 import {
   addDays,
+  band,
+  capMark,
   capRating,
+  capScore,
   daysBetween,
   LADDER,
   LAPSED_LADDER,
+  minScoreByLo,
   nextInterval,
   nextSchedule,
+  orderFor,
   tierOf,
   todayIso,
   worstByLo,
+  worstMark,
   worstRating,
   yellowInterval,
   type Tier,
@@ -277,4 +283,68 @@ test("no single rating produces mature", () => {
   expect(
     tierOf({ ...nextSchedule({ intervalDays: 30, lapses: 1, streak: 0 }, "green", TODAY), lastRating: "green" }),
   ).toBe("consolidating");
+});
+
+// --- Phase 5: scores and marks ---
+
+test("band folds a 1–5 score onto a concept mark", () => {
+  expect(band(5)).toBe("green");
+  expect(band(4)).toBe("yellow");
+  // The rubric's 3 includes "a big mistake", which is what red meant.
+  expect(band(3)).toBe("red");
+  expect(band(2)).toBe("red");
+  expect(band(1)).toBe("red");
+});
+
+test("orderFor keys the question's order to the objective's latest score", () => {
+  expect(orderFor(null)).toBe("first");
+  expect(orderFor(1)).toBe("first");
+  expect(orderFor(3)).toBe("first");
+  expect(orderFor(4)).toBe("second");
+  expect(orderFor(5)).toBe("third");
+});
+
+test("a cue turns a 5 into a 4: correct with help", () => {
+  expect(capScore(5, true)).toBe(4);
+  expect(capScore(5, false)).toBe(5);
+});
+
+test("a cue never improves or further lowers a score below 5", () => {
+  expect(capScore(4, true)).toBe(4);
+  expect(capScore(3, true)).toBe(3);
+  expect(capScore(1, true)).toBe(1);
+});
+
+test("a cue caps a green mark at yellow and leaves the rest alone", () => {
+  expect(capMark("green", true)).toBe("yellow");
+  expect(capMark("green", false)).toBe("green");
+  expect(capMark("yellow", true)).toBe("yellow");
+  expect(capMark("red", true)).toBe("red");
+});
+
+test("the worst mark of a sitting represents the concept's day", () => {
+  expect(worstMark(["green", "red", "green"])).toBe("red");
+  expect(worstMark(["green", "yellow"])).toBe("yellow");
+  expect(worstMark(["green", "green"])).toBe("green");
+  expect(worstMark([])).toBeUndefined();
+});
+
+test("minScoreByLo takes each objective's lowest score across the sitting", () => {
+  const result = minScoreByLo([
+    { loId: 1, score: 5 },
+    { loId: 1, score: 3 },
+    { loId: 2, score: 4 },
+  ]);
+  expect(result.get(1)).toBe(3);
+  expect(result.get(2)).toBe(4);
+});
+
+test("minScoreByLo ignores ungraded turns and turns with no objective", () => {
+  const result = minScoreByLo([
+    { loId: null, score: 1 },
+    { loId: 1, score: null },
+    { loId: 1, score: 4 },
+  ]);
+  expect(result.get(1)).toBe(4);
+  expect(result.size).toBe(1);
 });

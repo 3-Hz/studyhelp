@@ -18,6 +18,26 @@ export const RATINGS = ["green", "yellow", "red", "suspended"] as const;
 export type Rating = (typeof RATINGS)[number];
 
 /**
+ * A concept's mark for a day, per new_prompt.txt "Dashboard": green =
+ * correct, yellow = partially correct or a minor error, red = incorrect. The
+ * ladder moves on marks. Suspension is not a mark: it is a state on the
+ * objective (learningObjectives.suspended).
+ */
+export const MARKS = ["green", "yellow", "red"] as const;
+export type Mark = (typeof MARKS)[number];
+
+/**
+ * An objective's score for a day, per new_prompt.txt "Scoring":
+ *   5 — correct without help
+ *   4 — correct with help, or mostly correct
+ *   3 — partially correct, with a big mistake
+ *   2 — not correct
+ *   1 — no idea
+ */
+export const SCORES = [1, 2, 3, 4, 5] as const;
+export type Score = (typeof SCORES)[number];
+
+/**
  * Provenance keeps supplemental medical knowledge from ever being silently
  * attributed to the lecture (prompt.txt "Lecture Processing").
  */
