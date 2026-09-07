@@ -2,7 +2,8 @@ import { and, asc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import type { Rating } from "@/lib/db/schema";
 import {
-  capRating,
+  band,
+  capScore,
   nextSchedule,
   tierOf,
   todayIso,
@@ -227,16 +228,17 @@ export async function submitAnswer(
     hintsUsed: pending.hintsUsed,
   });
 
-  const rating = capRating(grade.rating, pending.hintsUsed);
+  const score = capScore(grade.score, pending.hintsUsed);
+  const rating = band(score);
 
   await db
     .update(schema.attempts)
-    .set({ studentAnswer: answer, rating, feedback: JSON.stringify(grade) })
+    .set({ studentAnswer: answer, rating, score, feedback: JSON.stringify(grade) })
     .where(eq(schema.attempts.id, pending.id));
 
   return {
     rating,
-    modelRating: grade.rating,
+    modelRating: band(grade.score),
     grade,
     why: loaded.kind.explain?.(pending, loaded.material),
   };
@@ -294,14 +296,14 @@ export interface SessionResult {
  */
 function debriefRequest(attempts: AttemptRow[]): DebriefRequest {
   const answered = attempts
-    .filter((attempt) => attempt.rating !== null)
+    .filter((attempt) => attempt.score !== null)
     .map((attempt) => {
       const grade = attempt.feedback
         ? (JSON.parse(attempt.feedback) as { missing?: string[]; incorrect?: string[] })
         : {};
       return {
         question: attempt.question,
-        rating: attempt.rating as string,
+        score: attempt.score as number,
         missing: grade.missing ?? [],
         incorrect: grade.incorrect ?? [],
       };

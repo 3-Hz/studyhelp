@@ -2,7 +2,7 @@ import type { LanguageModel } from "ai";
 import type { Rating, SessionStage } from "@/lib/db/schema";
 import { profileFor, type ModelProfile } from "@/lib/llm/config";
 import { generateStructured } from "@/lib/llm/structured";
-import type { Tier } from "@/lib/schedule";
+import type { QuestionOrder, Tier } from "@/lib/schedule";
 import type { Bucket } from "@/lib/session/select";
 import {
   DebriefOutput,
@@ -22,8 +22,19 @@ export interface ConceptContext {
   concept: string;
   kind: string;
   provenance: string;
+  /**
+   * The concept's number within its objective. Absent (or 0) for an item
+   * that predates numbering; such a line is bulleted rather than numbered.
+   */
+  ordinal?: number;
   /** Set only for concepts pulled in from another lecture. */
   lectureTitle?: string;
+}
+
+/** A question the lecture itself poses, with the answer its materials give. */
+export interface PracticeQuestionContext {
+  question: string;
+  answer: string;
 }
 
 /** The most recent graded attempt on a concept, from an earlier session. */
@@ -55,10 +66,18 @@ export interface TurnContext {
    * interleaved, fill. Absent for same-day turns, which have no such notion.
    */
   bucket?: Bucket;
-  /** The item's mastery tier. Steers how demanding the question is. */
+  /** The item's mastery tier: shown on the badge after grading, not read by the prompt. */
   tier?: Tier;
+  /**
+   * How demanding the question should be, from the objective's latest score
+   * (new_prompt.txt): first-order recall, second-order explanation,
+   * third-order application. Absent means no steer.
+   */
+  order?: QuestionOrder;
   /** What happened last time this concept was tested, if it was. */
   lastAttempt?: PriorAttempt;
+  /** The lecture's own questions for this objective, preferred when they fit. */
+  practiceQuestions?: PracticeQuestionContext[];
 }
 
 /**
@@ -71,14 +90,35 @@ export interface TutorOptions {
   model?: LanguageModel;
 }
 
+/**
+ * The concepts as a numbered list — the numbers are what the grader marks and
+ * what the LO Map shows — with an unnumbered item bulleted instead.
+ */
 function conceptLines(concepts: ConceptContext[]): string {
   if (concepts.length === 0) return "(no concepts were extracted for this objective)";
   return concepts
     .map((c) => {
       const source = c.lectureTitle ? `, from ${c.lectureTitle}` : "";
-      return `- [${c.kind}, ${c.provenance}${source}] ${c.concept}`;
+      const marker = c.ordinal ? `${c.ordinal}.` : "-";
+      return `${marker} [${c.kind}, ${c.provenance}${source}] ${c.concept}`;
     })
     .join("\n");
+}
+
+/** The target concept, named by its number when it has one. */
+function targetLine(context: TurnContext): string {
+  if (!context.targetConcept) return "";
+  const target = context.concepts.find((c) => c.concept === context.targetConcept);
+  const number = target?.ordinal ? `${target.ordinal}. ` : "";
+  return `Target concept: ${number}${context.targetConcept}`;
+}
+
+function practiceLines(questions: PracticeQuestionContext[] | undefined): string {
+  if (!questions || questions.length === 0) return "";
+  return [
+    "Practice questions the lecture itself provides for this objective. Prefer one of these, or a close variant, when it tests the target concept:",
+    ...questions.map((q) => `- Q: ${q.question}\n  A: ${q.answer || "(no answer given in the materials)"}`),
+  ].join("\n");
 }
 
 /** The stages the tutor is asked to compose. The reflection is fixed text owned by the runner. */
@@ -92,37 +132,35 @@ const STAGE_BRIEF: Record<AskableStage, string> = {
   daily: `This is daily retrieval practice, mixing material from several lectures. Ask about the target concept named below and nothing else. The student has met this material before, so do not re-teach it — ask them to retrieve it. Where concepts from other lectures are listed, the question should make the student distinguish or connect them rather than recite either one.`,
 };
 
-/** A focused question, in steps: prompt.txt "Adaptive Difficulty" for new or weak material. */
-const FOCUSED_BRIEF =
-  "Ask a focused question about one part of this concept. Let the student work in steps. Do not combine it with other material.";
-
 /**
- * How demanding the question should be, from the item's tier (prompt.txt
- * "Adaptive Difficulty"). Kind decides the question's shape through the
- * format family; tier decides its demand. Code sets the tier; the model
- * shapes the question to it.
+ * How demanding the question should be, from the objective's latest score
+ * (new_prompt.txt "Repetition Quiz Session": first-order on recent poor
+ * performance, second on neutral, third on good). Kind decides the question's
+ * shape through the format family; order decides its demand. Code sets the
+ * order; the model shapes the question to it.
  */
-const TIER_BRIEF: Record<Tier, string> = {
-  new: FOCUSED_BRIEF,
-  relearning: `The student missed this last time. ${FOCUSED_BRIEF}`,
-  consolidating:
-    "The student has retrieved this before. Ask for the whole concept, unscaffolded; nothing in the wording should narrow it.",
-  mature:
-    "The student has retrieved this reliably across increasing intervals. Test it through application or discrimination in a context the lecture did not use, combine it with the related concepts listed, and where plausible alternatives exist ask why the wrong ones are wrong.",
+const ORDER_BRIEF: Record<QuestionOrder, string> = {
+  first:
+    "This is a first-order question: direct recall of the material as it was taught. Ask a focused question about one part of this concept. Let the student work in steps. Do not combine it with other material.",
+  second:
+    "This is a second-order question. The student has retrieved this before. Ask for the whole concept, unscaffolded — why or how, not only what; nothing in the wording should narrow it.",
+  third:
+    "This is a third-order question. The student has retrieved this reliably. Test it through application or discrimination in a context the lecture did not use, combine it with the related concepts listed, and where plausible alternatives exist ask why the wrong ones are wrong.",
 };
 
 /**
  * Last time, as the model needs it: what was missed, what was wrong, the
- * correction given — and a steer that depends on tier. Relearning targets the
- * gap (prompt.txt: "target the missing component"); anything more mature
- * tests the same point by another route rather than repeating the wording.
+ * correction given — and a steer that depends on order. A first-order
+ * question targets the gap (prompt.txt: "target the missing component");
+ * anything higher tests the same point by another route rather than
+ * repeating the wording.
  */
-function lastAttemptLines(last: PriorAttempt, tier: Tier | undefined): string {
+function lastAttemptLines(last: PriorAttempt, order: QuestionOrder | undefined): string {
   const when =
     last.daysAgo === 0 ? "earlier today" : last.daysAgo === 1 ? "yesterday" : `${last.daysAgo} days ago`;
   const about = last.aboutObjective ? "on the objective as a whole" : "on this concept";
   const steer =
-    tier === "new" || tier === "relearning"
+    order === undefined || order === "first"
       ? "Target what was missed."
       : "Do not repeat that wording: test the same point through a different route.";
 
@@ -151,22 +189,23 @@ export async function askQuestion(
     ? `\nFormats already used this session, which you should avoid repeating: ${context.usedFormats.join(", ")}.`
     : "";
 
-  const tierBrief = context.tier ? TIER_BRIEF[context.tier] : "";
+  const orderBrief = context.order ? ORDER_BRIEF[context.order] : "";
   const lastAttempt = context.lastAttempt
-    ? lastAttemptLines(context.lastAttempt, context.tier)
+    ? lastAttemptLines(context.lastAttempt, context.order)
     : "";
 
   const prompt = [
     STAGE_BRIEF[context.stage],
-    tierBrief,
+    orderBrief,
     lastAttempt,
     "",
     `Lecture: ${context.lectureTitle}`,
     context.objective ? `Objective: ${context.objective}` : "",
-    context.targetConcept ? `Target concept: ${context.targetConcept}` : "",
+    targetLine(context),
     "",
     "Concepts available to build from:",
     conceptLines(context.concepts),
+    practiceLines(context.practiceQuestions),
     used,
   ]
     .filter(Boolean)
@@ -204,6 +243,8 @@ export async function gradeAnswer(
     "",
     "Concepts the answer could reasonably have drawn on:",
     conceptLines(request.concepts),
+    "",
+    "Mark each numbered concept the answer tested — green, yellow or red — and leave out the ones it did not touch.",
     "",
     `Question asked: ${request.question}`,
     "",
@@ -276,7 +317,8 @@ export async function giveHint(
 export interface DebriefRequest {
   answered: {
     question: string;
-    rating: string;
+    /** The question's 1–5 score. */
+    score: number;
     missing: string[];
     incorrect: string[];
   }[];
@@ -303,7 +345,7 @@ export async function summariseSession(
     "",
     ...request.answered.map((attempt, index) =>
       [
-        `${index + 1}. [${attempt.rating}] ${attempt.question}`,
+        `${index + 1}. [${attempt.score}/5] ${attempt.question}`,
         attempt.missing.length ? `   missing: ${attempt.missing.join("; ")}` : "",
         attempt.incorrect.length ? `   wrong: ${attempt.incorrect.join("; ")}` : "",
       ]

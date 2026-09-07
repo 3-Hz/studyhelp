@@ -51,6 +51,8 @@ const draft = {
  * A tutor that grades from a script rather than a model, so the flow can be
  * driven deterministically. Ratings are consumed in the order given.
  */
+const SCORE_FOR = { green: 5, yellow: 4, red: 2 } as const;
+
 function stubTutor(ratings: Rating[]): TutorDeps {
   const queue = [...ratings];
   return {
@@ -59,7 +61,8 @@ function stubTutor(ratings: Rating[]): TutorDeps {
       question: `Question for ${context.stage}/${context.objective ?? "lecture"}`,
     }),
     gradeAnswer: async () => ({
-      rating: queue.shift() ?? "green",
+      score: SCORE_FOR[queue.shift() ?? "green"],
+      conceptMarks: [],
       correct: [],
       missing: [],
       incorrect: [],

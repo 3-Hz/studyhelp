@@ -3,7 +3,7 @@ import type { LanguageModelV4GenerateResult } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import type { ModelProfile } from "@/lib/llm/config";
 import { askQuestion, gradeAnswer, giveHint, summariseSession } from "./index";
-import { GradeOutput, QuestionOutput } from "./schema";
+import { GradeOutput, QuestionOutput, TUTOR_SYSTEM } from "./schema";
 
 /**
  * The tutor's contracts have to survive the prompted path, since a local model
@@ -85,7 +85,8 @@ test("a grade survives markdown fences and leading prose", async () => {
   const model = new MockLanguageModelV4({
     doGenerate: async () =>
       textResult(
-        'Certainly! Here is my assessment:\n```json\n{"rating":"yellow",' +
+        'Certainly! Here is my assessment:\n```json\n{"score":4,' +
+          '"conceptMarks":[{"number":1,"mark":"yellow"}],' +
           '"correct":["Named both precursors"],"missing":["Organ tropism"],' +
           '"incorrect":[],"correction":"ATTR is transthyretin.",' +
           '"modelAnswer":"AL comes from light chains; ATTR from transthyretin."}\n```',
@@ -97,14 +98,16 @@ test("a grade survives markdown fences and leading prose", async () => {
     { profile, model },
   );
 
-  expect(grade.rating).toBe("yellow");
+  expect(grade.score).toBe(4);
+  expect(grade.conceptMarks).toEqual([{ number: 1, mark: "yellow" }]);
   expect(grade.missing).toEqual(["Organ tropism"]);
   expect(grade.followUp).toBeUndefined();
 });
 
-test("the model cannot hand out a suspended rating", () => {
-  const parsed = GradeOutput.safeParse({
-    rating: "suspended",
+test("a score is a whole number from 1 to 5, and a mark is a colour", () => {
+  const grade = (score: unknown, mark: unknown = "green") => ({
+    score,
+    conceptMarks: [{ number: 1, mark }],
     correct: [],
     missing: [],
     incorrect: [],
@@ -112,7 +115,18 @@ test("the model cannot hand out a suspended rating", () => {
     modelAnswer: "y",
   });
 
-  expect(parsed.success).toBe(false);
+  expect(GradeOutput.safeParse(grade(3)).success).toBe(true);
+  expect(GradeOutput.safeParse(grade(0)).success).toBe(false);
+  expect(GradeOutput.safeParse(grade(6)).success).toBe(false);
+  expect(GradeOutput.safeParse(grade(3.5)).success).toBe(false);
+  expect(GradeOutput.safeParse(grade("green")).success).toBe(false);
+  expect(GradeOutput.safeParse(grade(5, "suspended")).success).toBe(false);
+});
+
+test("the system block carries the 1–5 rubric", () => {
+  expect(TUTOR_SYSTEM).toMatch(/5 .*correct without help/i);
+  expect(TUTOR_SYSTEM).toMatch(/1 .*no idea/i);
+  expect(TUTOR_SYSTEM).toMatch(/mark .*each concept/i);
 });
 
 test("a hinted attempt tells the grader so in the prompt", async () => {
@@ -121,7 +135,7 @@ test("a hinted attempt tells the grader so in the prompt", async () => {
     doGenerate: async (options) => {
       prompts.push(JSON.stringify(options.prompt));
       return textResult(
-        '{"rating":"green","correct":[],"missing":[],"incorrect":[],' +
+        '{"score":5,"conceptMarks":[],"correct":[],"missing":[],"incorrect":[],' +
           '"correction":"none","modelAnswer":"ok"}',
       );
     },
@@ -133,6 +147,89 @@ test("a hinted attempt tells the grader so in the prompt", async () => {
   );
 
   expect(prompts[0]).toMatch(/cue before answering/i);
+});
+
+test("concepts are numbered by their ordinal, and the target is named by number", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult('{"format":"free_recall","question":"Explain."}');
+    },
+  });
+
+  const concepts = [
+    { concept: "Cross-beta sheet — the shared fibril fold.", kind: "fact", provenance: "taught", ordinal: 1 },
+    { concept: "Congo red — apple-green birefringence.", kind: "fact", provenance: "taught", ordinal: 2 },
+    // Before the migration's backfill an item may carry no number.
+    { concept: "Unnumbered.", kind: "fact", provenance: "derived" },
+  ];
+
+  await askQuestion(
+    { ...context, stage: "daily", concepts, targetConcept: concepts[1].concept },
+    { profile, model },
+  );
+
+  expect(prompts[0]).toMatch(/1\. \[fact, taught\] Cross-beta/);
+  expect(prompts[0]).toMatch(/2\. \[fact, taught\] Congo red/);
+  expect(prompts[0]).toMatch(/- \[fact, derived\] Unnumbered/);
+  expect(prompts[0]).toMatch(/Target concept: 2\. Congo red/);
+});
+
+test("the grader is asked to mark each numbered concept the answer tested", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult(
+        '{"score":5,"conceptMarks":[{"number":1,"mark":"green"}],"correct":[],"missing":[],' +
+          '"incorrect":[],"correction":"","modelAnswer":"ok"}',
+      );
+    },
+  });
+
+  await gradeAnswer(
+    {
+      ...context,
+      concepts: [{ ...context.concepts[0], ordinal: 1 }],
+      question: "Compare them.",
+      studentAnswer: "An answer.",
+      hintsUsed: false,
+    },
+    { profile, model },
+  );
+
+  expect(prompts[0]).toMatch(/1\. \[mechanism, taught\]/);
+  expect(prompts[0]).toMatch(/each numbered concept the answer tested/i);
+  expect(prompts[0]).toMatch(/leave out/i);
+});
+
+test("the lecture's practice questions reach the ask prompt, to be preferred when they fit", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult('{"format":"short_answer","question":"Which stain?"}');
+    },
+  });
+
+  await askQuestion(
+    {
+      ...context,
+      practiceQuestions: [
+        { question: "Which stain confirms amyloid?", answer: "Congo red." },
+      ],
+    },
+    { profile, model },
+  );
+
+  expect(prompts[0]).toMatch(/Practice questions the lecture/i);
+  expect(prompts[0]).toMatch(/Which stain confirms amyloid\?/);
+  expect(prompts[0]).toMatch(/Congo red\./);
+  expect(prompts[0]).toMatch(/prefer one/i);
+
+  await askQuestion(context, { profile, model });
+  expect(prompts[1]).not.toMatch(/Practice questions/i);
 });
 
 test("supplied concepts carry their provenance into the prompt", async () => {
@@ -240,7 +337,7 @@ test("the student's reflection reaches the debrief prompt and calibration comes 
 
   const debrief = await summariseSession(
     {
-      answered: [{ question: "Name the precursor.", rating: "red", missing: ["The precursor"], incorrect: [] }],
+      answered: [{ question: "Name the precursor.", score: 2, missing: ["The precursor"], incorrect: [] }],
       reflection: "I think I have the precursors down.",
     },
     { profile, model },
@@ -248,6 +345,7 @@ test("the student's reflection reaches the debrief prompt and calibration comes 
 
   expect(prompts[0]).toMatch(/own account/i);
   expect(prompts[0]).toMatch(/precursors down/);
+  expect(prompts[0]).toMatch(/\[2\/5\]/);
   expect(debrief.calibration).toMatch(/felt sure/);
 });
 
@@ -263,7 +361,7 @@ test("a debrief without a reflection asks for no calibration, and parses without
   });
 
   const debrief = await summariseSession(
-    { answered: [{ question: "Q", rating: "yellow", missing: [], incorrect: [] }], reflection: null },
+    { answered: [{ question: "Q", score: 4, missing: [], incorrect: [] }], reflection: null },
     { profile, model },
   );
 
@@ -271,7 +369,31 @@ test("a debrief without a reflection asks for no calibration, and parses without
   expect(debrief.calibration).toBe("");
 });
 
-test("the tier brief steers the question's demand", async () => {
+test("the order brief steers the question's demand", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult('{"format":"vignette","question":"A patient presents…"}');
+    },
+  });
+
+  await askQuestion({ ...context, stage: "daily", order: "third" }, { profile, model });
+  expect(prompts[0]).toMatch(/third-order/i);
+  expect(prompts[0]).toMatch(/application or discrimination/i);
+  expect(prompts[0]).toMatch(/wrong ones are wrong/i);
+
+  await askQuestion({ ...context, stage: "daily", order: "first" }, { profile, model });
+  expect(prompts[1]).toMatch(/first-order/i);
+  expect(prompts[1]).toMatch(/one part of this concept/i);
+  expect(prompts[1]).not.toMatch(/application or discrimination/i);
+
+  await askQuestion({ ...context, stage: "daily", order: "second" }, { profile, model });
+  expect(prompts[2]).toMatch(/second-order/i);
+  expect(prompts[2]).toMatch(/whole concept/i);
+});
+
+test("the tier alone no longer steers the question", async () => {
   const { prompts } = capture();
   const model = new MockLanguageModelV4({
     doGenerate: async (options) => {
@@ -281,15 +403,7 @@ test("the tier brief steers the question's demand", async () => {
   });
 
   await askQuestion({ ...context, stage: "daily", tier: "mature" }, { profile, model });
-  expect(prompts[0]).toMatch(/application or discrimination/i);
-  expect(prompts[0]).toMatch(/wrong ones are wrong/i);
-
-  await askQuestion({ ...context, stage: "daily", tier: "relearning" }, { profile, model });
-  expect(prompts[1]).toMatch(/one part of this concept/i);
-  expect(prompts[1]).not.toMatch(/application or discrimination/i);
-
-  await askQuestion({ ...context, stage: "daily", tier: "consolidating" }, { profile, model });
-  expect(prompts[2]).toMatch(/whole concept/i);
+  expect(prompts[0]).not.toMatch(/application or discrimination/i);
 });
 
 test("the bucket no longer reaches the prompt", async () => {
@@ -306,7 +420,7 @@ test("the bucket no longer reaches the prompt", async () => {
   expect(prompts[0]).not.toMatch(/gone badly/i);
 });
 
-test("the last attempt reaches the prompt, with a steer that depends on tier", async () => {
+test("the last attempt reaches the prompt, with a steer that depends on order", async () => {
   const { prompts } = capture();
   const model = new MockLanguageModelV4({
     doGenerate: async (options) => {
@@ -325,7 +439,7 @@ test("the last attempt reaches the prompt, with a steer that depends on tier", a
   };
 
   await askQuestion(
-    { ...context, stage: "daily", tier: "relearning", lastAttempt },
+    { ...context, stage: "daily", order: "first", lastAttempt },
     { profile, model },
   );
   expect(prompts[0]).toMatch(/3 days ago/);
@@ -338,7 +452,7 @@ test("the last attempt reaches the prompt, with a steer that depends on tier", a
     {
       ...context,
       stage: "daily",
-      tier: "mature",
+      order: "third",
       lastAttempt: { ...lastAttempt, daysAgo: 1, rating: "green", hintsUsed: true, aboutObjective: true },
     },
     { profile, model },

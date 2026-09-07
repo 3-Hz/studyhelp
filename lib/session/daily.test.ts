@@ -76,6 +76,9 @@ async function seedLecture(title: string, objectives: number, block: string) {
   return lecture.id;
 }
 
+/** The score a scripted colour stands for, until these scripts speak in scores. */
+const SCORE_FOR = { green: 5, yellow: 4, red: 2 } as const;
+
 /** A tutor that always picks the first format it is allowed to. */
 function stubTutor(ratings: Rating[]): TutorDeps {
   const queue = [...ratings];
@@ -85,7 +88,8 @@ function stubTutor(ratings: Rating[]): TutorDeps {
       question: `Question about ${context.targetConcept ?? context.objective ?? "the lecture"}`,
     }),
     gradeAnswer: async () => ({
-      rating: queue.shift() ?? "green",
+      score: SCORE_FOR[queue.shift() ?? "green"],
+      conceptMarks: [],
       correct: [],
       missing: [],
       incorrect: [],

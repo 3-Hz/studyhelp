@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { MARKS, SCORES } from "@/lib/db/schema";
 
 /**
  * Question formats from prompt.txt "Daily Anki-Like Retrieval Practice".
@@ -56,19 +57,38 @@ export function questionSchemaFor(allowed?: QuestionFormat[]) {
 }
 
 /**
- * The grading contract.
- *
- * "suspended" is absent by design: dark green is the student's decision to stop
- * being quizzed on something, never a grade the model can hand out.
+ * The grading contract: a 1–5 score for the answer (new_prompt.txt
+ * "Scoring") and a mark for each numbered concept it tested (the Dashboard's
+ * coloured concept numbers). Suspension is not here by design: dark green is
+ * the student's decision to stop being quizzed, never a grade.
  */
 export const GradeOutput = z.object({
-  rating: z
-    .enum(["green", "yellow", "red"])
+  score: z
+    .literal([...SCORES])
     .describe(
-      "green = accurate, complete and independently retrieved; yellow = " +
-        "partly correct, missing important content, or needed meaningful " +
-        "hints; red = the central answer was not recalled, or a major " +
-        "misconception was stated.",
+      "5 = answered correctly without help; 4 = correctly with help, or " +
+        "mostly correctly but not entirely; 3 = partially correctly, but " +
+        "with a big mistake; 2 = not correctly; 1 = no idea.",
+    ),
+  conceptMarks: z
+    .array(
+      z.object({
+        number: z
+          .number()
+          .int()
+          .min(1)
+          .describe("The concept's number in the list supplied."),
+        mark: z
+          .enum(MARKS)
+          .describe(
+            "green = correct; yellow = partially correct or a minor error; " +
+              "red = incorrect.",
+          ),
+      }),
+    )
+    .describe(
+      "One entry per numbered concept the answer actually tested. Leave out " +
+        "concepts the answer did not touch.",
     ),
   correct: z.array(z.string()).describe("What the student got right."),
   missing: z
@@ -151,6 +171,8 @@ Rules for asking:
 - Create difficulty through retrieval and application, never through obscurity or trick wording.
 
 Rules for grading:
+- Score the answer from 1 to 5: 5 — correct without help; 4 — correct with help, or mostly correct but not entirely; 3 — partially correct, but with a big mistake; 2 — not correct; 1 — no idea.
+- Mark each concept the answer tested: green = correct, yellow = partially correct or a minor error, red = incorrect. Leave out the concepts the answer did not touch.
 - Never call a meaningfully flawed answer correct. Being encouraging about a wrong answer is a failure.
 - Distinguish major gaps from minor differences of wording.
 - Content that is merely absent is not the same as content that is wrong. Keep them separate.

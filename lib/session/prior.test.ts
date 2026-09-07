@@ -34,6 +34,8 @@ const draft = {
   conflicts: [],
 };
 
+const SCORE_FOR = { green: 5, yellow: 4, red: 2 } as const;
+
 /** Grades from a script, and reports the same `missing` on every grade. */
 function stubTutor(ratings: Rating[], missing: string[] = []): TutorDeps {
   const queue = [...ratings];
@@ -43,7 +45,8 @@ function stubTutor(ratings: Rating[], missing: string[] = []): TutorDeps {
       question: `Question about ${context.targetConcept ?? context.objective ?? "the lecture"}`,
     }),
     gradeAnswer: async () => ({
-      rating: queue.shift() ?? "green",
+      score: SCORE_FOR[queue.shift() ?? "green"],
+      conceptMarks: [],
       correct: [],
       missing,
       incorrect: [],
