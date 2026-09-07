@@ -218,3 +218,62 @@ test("0006 creates practice_questions under a lecture, optionally under an objec
 
   expect(count(sqlite, "practice_questions")).toBe(2);
 });
+
+// --- 0007: the colour columns go ---
+
+const DROP_COLOURS = files.find((file) => file.startsWith("0007_"));
+const BEFORE_DROP = files.filter((file) => file < "0007_");
+
+function freshBeforeDrop(): Database {
+  const sqlite = new Database(":memory:");
+  for (const file of BEFORE_DROP) apply(sqlite, file);
+  sqlite.exec("INSERT INTO lectures (title) VALUES ('Amyloidosis')");
+  sqlite.exec(
+    "INSERT INTO learning_objectives (lecture_id, text, order_index) VALUES (1, 'Describe fibrils.', 0)",
+  );
+  sqlite.exec(
+    "INSERT INTO study_dates (date) VALUES ('2026-09-01'), ('2026-09-02'), ('2026-09-03')",
+  );
+  return sqlite;
+}
+
+function columnsOf(sqlite: Database, table: string): string[] {
+  return (sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
+    (column) => column.name,
+  );
+}
+
+test("0007 drops the rating columns and keeps the scores", () => {
+  expect(DROP_COLOURS).toBeDefined();
+  const sqlite = freshBeforeDrop();
+  sqlite.exec(
+    "INSERT INTO performances (lo_id, study_date_id, rating, score) VALUES (1, 1, 'green', 5)",
+  );
+  sqlite.exec("INSERT INTO sessions (type) VALUES ('daily')");
+  sqlite.exec(
+    "INSERT INTO attempts (session_id, stage, format, question, rating, score) " +
+      "VALUES (1, 'daily', 'free_recall', 'q', 'yellow', 4)",
+  );
+
+  apply(sqlite, DROP_COLOURS!);
+
+  expect(columnsOf(sqlite, "performances")).not.toContain("rating");
+  expect(columnsOf(sqlite, "attempts")).not.toContain("rating");
+  expect((sqlite.prepare("SELECT score FROM performances").get() as { score: number }).score).toBe(5);
+  expect((sqlite.prepare("SELECT score FROM attempts").get() as { score: number }).score).toBe(4);
+});
+
+test("0007 makes a cell's score required, dropping any cell that never had one", () => {
+  const sqlite = freshBeforeDrop();
+  sqlite.exec(
+    "INSERT INTO performances (lo_id, study_date_id, rating, score) VALUES " +
+      "(1, 1, 'green', 5), (1, 2, 'suspended', NULL)",
+  );
+
+  apply(sqlite, DROP_COLOURS!);
+
+  expect(count(sqlite, "performances")).toBe(1);
+  expect(() =>
+    sqlite.exec("INSERT INTO performances (lo_id, study_date_id) VALUES (1, 3)"),
+  ).toThrow();
+});

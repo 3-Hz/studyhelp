@@ -1,4 +1,4 @@
-import type { Mark, Rating, Score } from "@/lib/db/schema";
+import type { Mark, Score } from "@/lib/db/schema";
 
 /**
  * Deterministic spaced repetition, per prompt.txt "Spaced-Repetition
@@ -77,18 +77,6 @@ export function daysBetween(from: string, to: string): number {
 }
 
 /**
- * Hinted recall is never independent mastery (prompt.txt Retrieval Rule 8), so
- * a hinted green becomes yellow.
- *
- * This lives in code rather than the grading prompt on purpose: it is a policy,
- * not a judgement, and the model should not be able to grade its way around it.
- */
-export function capRating(rating: Rating, hintsUsed: boolean): Rating {
-  if (hintsUsed && rating === "green") return "yellow";
-  return rating;
-}
-
-/**
  * A score folded onto a mark. 5 is green; 4 — "correct with help, or mostly
  * correct" — is yellow; 3 and below are red, because the rubric's 3 includes
  * "a big mistake", and a big mistake is what red has always meant here.
@@ -120,8 +108,13 @@ export function orderFor(latestScore: Score | null): QuestionOrder {
 }
 
 /**
+ * Hinted recall is never independent mastery (prompt.txt Retrieval Rule 8).
  * "Correct with help" is a 4 by the rubric, so a cue turns a 5 into a 4 and
- * touches nothing else. In code, not the prompt, for the reason capRating is.
+ * touches nothing else.
+ *
+ * This lives in code rather than the grading prompt on purpose: it is a
+ * policy, not a judgement, and the model should not be able to grade its way
+ * around it.
  */
 export function capScore(score: Score, hintsUsed: boolean): Score {
   if (hintsUsed && score === 5) return 4;
@@ -164,39 +157,30 @@ export interface ScheduleResult {
 }
 
 /**
- * Where a review item lands after being answered.
+ * Where a review item lands after its concept was marked.
  *
  * `dueOn` is always `today + intervalDays`, so the stored interval always
  * describes the gap actually being used rather than a rung the item is not on.
- * Suspended items come back untouched: dark green means do not quiz again
- * until reactivated, so there is nothing to schedule.
+ * A suspended objective's items are never marked, so there is nothing to
+ * schedule for them.
  */
 export function nextSchedule(
   state: ScheduleState,
-  rating: Rating,
+  mark: Mark,
   today: string,
 ): ScheduleResult {
-  if (rating === "suspended") {
-    return {
-      dueOn: addDays(today, state.intervalDays),
-      intervalDays: state.intervalDays,
-      lapses: state.lapses,
-      streak: state.streak,
-    };
-  }
-
   const intervalDays =
-    rating === "green"
+    mark === "green"
       ? nextInterval(state.intervalDays, state.lapses)
-      : rating === "yellow"
+      : mark === "yellow"
         ? yellowInterval(state.intervalDays)
         : RED_INTERVAL;
 
   return {
     dueOn: addDays(today, intervalDays),
     intervalDays,
-    lapses: rating === "red" ? state.lapses + 1 : state.lapses,
-    streak: rating === "green" ? state.streak + 1 : 0,
+    lapses: mark === "red" ? state.lapses + 1 : state.lapses,
+    streak: mark === "green" ? state.streak + 1 : 0,
   };
 }
 
@@ -204,7 +188,7 @@ export const TIERS = ["new", "relearning", "consolidating", "mature"] as const;
 export type Tier = (typeof TIERS)[number];
 
 export interface TierState {
-  lastRating: Rating | null;
+  lastRating: Mark | null;
   lapses: number;
   streak: number;
   intervalDays: number;
@@ -215,8 +199,9 @@ export interface TierState {
  *
  * "relearning", not "weak": select() has a weak bucket with a broader meaning
  * that includes the objective's dashboard history. Bucket says why an item
- * was chosen today; tier says how to treat it. No single rating reaches
- * mature — that takes three greens in a row and a fortnight's interval.
+ * was chosen today; tier is the badge's account of how far it has come. No
+ * single mark reaches mature — that takes three greens in a row and a
+ * fortnight's interval.
  */
 export function tierOf(state: TierState): Tier {
   if (state.lastRating === null) return "new";
@@ -229,52 +214,14 @@ export function tierOf(state: TierState): Tier {
   return "consolidating";
 }
 
-/** Rating severity, worst first — the order used to summarise a day's attempts. */
-const SEVERITY: Rating[] = ["red", "yellow", "green", "suspended"];
-
-/**
- * The rating that represents a set of attempts on one objective in one session.
- *
- * The worst one. A green that follows a red in the same sitting is recall of
- * the correction just given, not independent retrieval, and a dashboard cell
- * has to describe the day honestly.
- */
-export function worstRating(ratings: Rating[]): Rating | undefined {
-  return SEVERITY.find((rating) => ratings.includes(rating));
-}
-
-/**
- * The rating that represents each objective across a set of turns.
- *
- * The worst one, per worstRating — and computed once, because the dashboard
- * cell and the review-item schedule describe the same performance and must
- * not be able to drift apart.
- */
-export function worstByLo(
-  turns: { loId: number | null; rating: Rating | null }[],
-): Map<number, Rating> {
-  const byLo = new Map<number, Rating[]>();
-  for (const turn of turns) {
-    if (turn.rating === null || turn.loId === null) continue;
-    const ratings = byLo.get(turn.loId) ?? [];
-    ratings.push(turn.rating);
-    byLo.set(turn.loId, ratings);
-  }
-
-  const worst = new Map<number, Rating>();
-  for (const [loId, ratings] of byLo) {
-    const rating = worstRating(ratings);
-    if (rating) worst.set(loId, rating);
-  }
-  return worst;
-}
-
-/** Mark severity, worst first. */
+/** Mark severity, worst first — the order used to summarise a day's marks. */
 const MARK_SEVERITY: Mark[] = ["red", "yellow", "green"];
 
 /**
- * The mark that represents a concept across one sitting: the worst one, for
- * the reason worstRating gives.
+ * The mark that represents a concept across one sitting: the worst one. A
+ * green that follows a red in the same sitting is recall of the correction
+ * just given, not independent retrieval, and the record has to describe the
+ * day honestly.
  */
 export function worstMark(marks: Mark[]): Mark | undefined {
   return MARK_SEVERITY.find((mark) => marks.includes(mark));

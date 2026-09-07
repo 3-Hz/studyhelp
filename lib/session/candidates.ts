@@ -1,5 +1,5 @@
 import { db, schema } from "@/lib/db";
-import type { Mark, Score } from "@/lib/db/schema";
+import type { Score } from "@/lib/db/schema";
 import { todayIso } from "@/lib/schedule";
 import type { ItemCandidate, LoCandidate } from "./select";
 
@@ -34,7 +34,7 @@ export async function dailyCandidates(): Promise<LoCandidate[]> {
   );
   for (const performance of chronological) {
     const scores = scoresByLo.get(performance.loId) ?? [];
-    scores.push(scoreOf(performance));
+    scores.push(performance.score);
     scoresByLo.set(performance.loId, scores);
   }
 
@@ -49,7 +49,7 @@ export async function dailyCandidates(): Promise<LoCandidate[]> {
       intervalDays: item.intervalDays,
       lapses: item.lapses,
       streak: item.streak,
-      lastRating: item.lastRating as Mark | null,
+      lastRating: item.lastRating,
     });
     itemsByLo.set(item.loId, list);
   }
@@ -74,10 +74,4 @@ export async function dailyCandidates(): Promise<LoCandidate[]> {
   }
 
   return candidates;
-}
-
-/** The cell's score, or its colour's equivalent for a cell written before scores. */
-function scoreOf(performance: { score: Score | null; rating: string }): Score {
-  if (performance.score !== null) return performance.score;
-  return performance.rating === "green" ? 5 : performance.rating === "yellow" ? 4 : 2;
 }

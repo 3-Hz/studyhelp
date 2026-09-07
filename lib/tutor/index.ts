@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai";
-import type { Rating, SessionStage } from "@/lib/db/schema";
+import type { Mark, Score, SessionStage } from "@/lib/db/schema";
 import { profileFor, type ModelProfile } from "@/lib/llm/config";
 import { generateStructured } from "@/lib/llm/structured";
 import type { QuestionOrder, Tier } from "@/lib/schedule";
@@ -27,6 +27,8 @@ export interface ConceptContext {
    * that predates numbering; such a line is bulleted rather than numbered.
    */
   ordinal?: number;
+  /** The review item behind it, so a numbered mark can be mapped back. Never shown. */
+  reviewItemId?: number;
   /** Set only for concepts pulled in from another lecture. */
   lectureTitle?: string;
 }
@@ -40,7 +42,10 @@ export interface PracticeQuestionContext {
 /** The most recent graded attempt on a concept, from an earlier session. */
 export interface PriorAttempt {
   daysAgo: number;
-  rating: Rating;
+  /** The question's 1–5 score. */
+  score: Score;
+  /** This concept's mark in that attempt, when the answer touched it. */
+  mark: Mark | null;
   hintsUsed: boolean;
   missing: string[];
   incorrect: string[];
@@ -52,7 +57,7 @@ export interface PriorAttempt {
 export interface TurnContext {
   stage: SessionStage;
   lectureTitle: string;
-  /** The objective under test. Absent for the whole-lecture summary stage. */
+  /** The objective under test. */
   objective?: string;
   concepts: ConceptContext[];
   /** Which concept this turn is about. Daily practice targets exactly one. */
@@ -127,9 +132,8 @@ type AskableStage = Exclude<SessionStage, "reflection">;
 /** Per-stage instruction, kept out of the system block so that stays cacheable. */
 const STAGE_BRIEF: Record<AskableStage, string> = {
   lo_recall: `This is LO recall. Ask the student to tell you everything they can about this one objective, before any answer is shown. Let them recite, outline, or work step by step.`,
-  summary: `This is the lecture summary. Ask the student to summarise the whole lecture from memory, without notes. Do not name the objectives — recalling what the lecture covered is part of the task.`,
-  elaboration: `This is elaboration and reflection. Ask why or how, compare similar concepts, predict the consequence of a mechanism failing, connect to earlier material, or have the student explain the idea to a classmate or patient. Go beyond restating the objective.`,
-  daily: `This is daily retrieval practice, mixing material from several lectures. Ask about the target concept named below and nothing else. The student has met this material before, so do not re-teach it — ask them to retrieve it. Where concepts from other lectures are listed, the question should make the student distinguish or connect them rather than recite either one.`,
+  lo_probe: `This is a first-order probe: the recall of this objective left the target concept named below untested or short. Ask directly about that concept and nothing else — the fact, term, or step as the lecture taught it.`,
+  daily: `This is daily retrieval practice, mixing material from several lectures. Ask about the target concept named below and nothing else. The student has met this material before, so do not re-teach it — ask them to retrieve it.`,
 };
 
 /**
@@ -164,8 +168,9 @@ function lastAttemptLines(last: PriorAttempt, order: QuestionOrder | undefined):
       ? "Target what was missed."
       : "Do not repeat that wording: test the same point through a different route.";
 
+  const marked = last.mark ? `, this concept ${last.mark}` : "";
   return [
-    `Last attempt, ${when}, ${about}: rated ${last.rating}${last.hintsUsed ? " after a cue" : ""}.`,
+    `Last attempt, ${when}, ${about}: scored ${last.score}/5${marked}${last.hintsUsed ? ", after a cue" : ""}.`,
     last.missing.length ? `  Missed: ${last.missing.join("; ")}` : "",
     last.incorrect.length ? `  Wrong: ${last.incorrect.join("; ")}` : "",
     last.correction ? `  Correction given: ${last.correction}` : "",

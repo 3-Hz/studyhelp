@@ -8,20 +8,10 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 /**
- * Ratings mirror the LO Dashboard colors defined in prompt.txt:
- *   green  — accurate, complete, independently retrieved, appropriately explained
- *   yellow — partly correct, missing important content, or needed meaningful hints
- *   red    — central answer not recalled, or a major misconception stated
- *   suspended (dark green) — do not quiz again unless reactivated
- */
-export const RATINGS = ["green", "yellow", "red", "suspended"] as const;
-export type Rating = (typeof RATINGS)[number];
-
-/**
  * A concept's mark for a day, per new_prompt.txt "Dashboard": green =
  * correct, yellow = partially correct or a minor error, red = incorrect. The
- * ladder moves on marks. Suspension is not a mark: it is a state on the
- * objective (learningObjectives.suspended).
+ * ladder moves on marks. Suspension (prompt.txt's dark green) is not a mark:
+ * it is a state on the objective (learningObjectives.suspended).
  */
 export const MARKS = ["green", "yellow", "red"] as const;
 export type Mark = (typeof MARKS)[number];
@@ -59,19 +49,15 @@ export const REVIEW_KINDS = [
 export type ReviewKind = (typeof REVIEW_KINDS)[number];
 
 /**
- * The same-day review runs lo_recall → summary → elaboration in order
- * (prompt.txt "Same-Day Retrieval Practice"). Daily practice has one graded
+ * The same-day review recalls each objective (lo_recall) and then probes the
+ * concepts the recall left untested or short (lo_probe), first-order only
+ * (new_prompt.txt "Review Quiz Session"). Daily practice has one graded
  * stage: its variety comes from the question format, not from a running
  * order. Both close with a reflection — the student's own account of the
- * session, ungraded.
+ * session, ungraded. Rows from before Phase 5 may carry the retired stages
+ * "summary" and "elaboration"; they are never asked again.
  */
-export const SESSION_STAGES = [
-  "lo_recall",
-  "summary",
-  "elaboration",
-  "daily",
-  "reflection",
-] as const;
+export const SESSION_STAGES = ["lo_recall", "lo_probe", "daily", "reflection"] as const;
 export type SessionStage = (typeof SESSION_STAGES)[number];
 
 /** What an uploaded file is, and therefore how it gets parsed. */
@@ -203,12 +189,8 @@ export const performances = sqliteTable(
     studyDateId: integer("study_date_id")
       .notNull()
       .references(() => studyDates.id, { onDelete: "cascade" }),
-    rating: text("rating", { enum: RATINGS }).notNull(),
-    /**
-     * The objective's 1–5 score for the day (new_prompt.txt "Scoring").
-     * Nullable only until the runner writes it and `rating` is dropped.
-     */
-    score: integer("score").$type<Score>(),
+    /** The objective's 1–5 score for the day (new_prompt.txt "Scoring"). */
+    score: integer("score").$type<Score>().notNull(),
     note: text("note"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
@@ -243,7 +225,8 @@ export const reviewItems = sqliteTable(
     /** ISO date the item is next due. */
     dueOn: text("due_on").notNull(),
     intervalDays: integer("interval_days").notNull().default(0),
-    lastRating: text("last_rating", { enum: RATINGS }),
+    /** The concept's most recent mark. */
+    lastRating: text("last_rating", { enum: MARKS }),
     lapses: integer("lapses").notNull().default(0),
     /**
      * Consecutive greens; red or yellow resets it. With intervalDays, lapses
@@ -314,10 +297,7 @@ export const attempts = sqliteTable(
       .references(() => sessions.id, { onDelete: "cascade" }),
     /** Which part of the session this turn belongs to. */
     stage: text("stage", { enum: SESSION_STAGES }).notNull(),
-    /**
-     * Null for the lecture-summary stage, which assesses the whole lecture
-     * rather than any single objective — and so contributes no dashboard cell.
-     */
+    /** Null for the reflection, which is about the session and earns no cell. */
     loId: integer("lo_id").references(() => learningObjectives.id, {
       onDelete: "cascade",
     }),
@@ -328,7 +308,6 @@ export const attempts = sqliteTable(
     format: text("format").notNull(),
     question: text("question").notNull(),
     studentAnswer: text("student_answer"),
-    rating: text("rating", { enum: RATINGS }),
     /** The question's 1–5 score, after capScore. Null until graded. */
     score: integer("score").$type<Score>(),
     /**
@@ -338,7 +317,7 @@ export const attempts = sqliteTable(
      */
     conceptMarks: text("concept_marks", { mode: "json" }).$type<ConceptMark[]>(),
     feedback: text("feedback"),
-    /** Hinted recall never counts as independent mastery — caps rating at yellow. */
+    /** Hinted recall never counts as independent mastery — caps the score at 4 and a green mark at yellow. */
     hintsUsed: integer("hints_used", { mode: "boolean" })
       .notNull()
       .default(false),

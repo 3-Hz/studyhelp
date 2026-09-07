@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 const TEST_DB = `./.test-session-${process.pid}.db`;
 process.env.DATABASE_URL = TEST_DB;
@@ -18,9 +18,13 @@ const {
 } = await import("./runner");
 const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
 
-type Rating = "green" | "yellow" | "red";
-type TutorDeps = Parameters<typeof currentTurn>[1];
+type TutorDeps = NonNullable<Parameters<typeof currentTurn>[1]>;
+type Score = 1 | 2 | 3 | 4 | 5;
+type Mark = "green" | "yellow" | "red";
+/** A scripted grade: a bare score marks nothing; an object marks the numbered concepts given. */
+type Scripted = Score | { score: Score; marks: { number: number; mark: Mark }[] };
 
+/** Objective 0 has one concept (#1); objective 1 has two (#1, #2) and a practice question. */
 const draft = {
   title: "Amyloidosis",
   learningObjectives: [
@@ -42,6 +46,21 @@ const draft = {
       provenance: "taught" as const,
       relatedObjectiveIndexes: [1],
     },
+    {
+      label: "Organ tropism",
+      detail: "AL takes kidney and heart together; wild-type ATTR is mostly cardiac.",
+      kind: "distinction" as const,
+      provenance: "taught" as const,
+      relatedObjectiveIndexes: [1],
+    },
+  ],
+  practiceQuestions: [
+    {
+      question: "Name the precursor protein in AL amyloidosis.",
+      answer: "Immunoglobulin light chain.",
+      slideRefs: [5],
+      relatedObjectiveIndexes: [1],
+    },
   ],
   commonConfusions: [],
   conflicts: [],
@@ -49,26 +68,29 @@ const draft = {
 
 /**
  * A tutor that grades from a script rather than a model, so the flow can be
- * driven deterministically. Ratings are consumed in the order given.
+ * driven deterministically. Grades are consumed in the order given; the
+ * script running out means 5 with no marks.
  */
-const SCORE_FOR = { green: 5, yellow: 4, red: 2 } as const;
-
-function stubTutor(ratings: Rating[]): TutorDeps {
-  const queue = [...ratings];
+function stubTutor(script: Scripted[]): TutorDeps {
+  const queue = [...script];
   return {
     askQuestion: async (context) => ({
-      format: "free_recall" as const,
-      question: `Question for ${context.stage}/${context.objective ?? "lecture"}`,
+      format: context.allowedFormats?.[0] ?? ("free_recall" as const),
+      question: `Question for ${context.stage}/${context.targetConcept ?? context.objective ?? "lecture"}`,
     }),
-    gradeAnswer: async () => ({
-      score: SCORE_FOR[queue.shift() ?? "green"],
-      conceptMarks: [],
-      correct: [],
-      missing: [],
-      incorrect: [],
-      correction: "A correction.",
-      modelAnswer: "A model answer.",
-    }),
+    gradeAnswer: async () => {
+      const next = queue.shift() ?? 5;
+      const { score, marks } = typeof next === "number" ? { score: next, marks: [] } : next;
+      return {
+        score,
+        conceptMarks: marks,
+        correct: [],
+        missing: [],
+        incorrect: [],
+        correction: "A correction.",
+        modelAnswer: "A model answer.",
+      };
+    },
     giveHint: async () => ({ hint: "Think about the precursor protein." }),
     summariseSession: async () => ({
       heldUp: ["Fibril structure"],
@@ -77,7 +99,7 @@ function stubTutor(ratings: Rating[]): TutorDeps {
       focusNext: "Practise the precursor proteins.",
       calibration: "",
     }),
-  } as TutorDeps;
+  };
 }
 
 beforeAll(() => {
@@ -111,6 +133,13 @@ async function objectivesOf(lectureId: number) {
   });
 }
 
+async function itemsOf(loId: number) {
+  return db.query.reviewItems.findMany({
+    where: eq(schema.reviewItems.loId, loId),
+    orderBy: [asc(schema.reviewItems.ordinal)],
+  });
+}
+
 /** Drives the session to completion, answering every question. */
 async function playThrough(sessionId: number, tutor: TutorDeps) {
   for (let guard = 0; guard < 20; guard++) {
@@ -119,6 +148,15 @@ async function playThrough(sessionId: number, tutor: TutorDeps) {
     await submitAnswer(sessionId, "An answer.", tutor);
   }
   throw new Error("Session did not terminate.");
+}
+
+/** The session's turns as the student met them: stage, objective, concept. */
+async function turnsOf(sessionId: number) {
+  const attempts = await db.query.attempts.findMany({
+    where: eq(schema.attempts.sessionId, sessionId),
+    orderBy: [asc(schema.attempts.id)],
+  });
+  return attempts.map((a) => ({ stage: a.stage, loId: a.loId, reviewItemId: a.reviewItemId }));
 }
 
 test("refuses to study a lecture whose objectives were never committed", async () => {
@@ -139,24 +177,64 @@ test("rejoins an unfinished session rather than starting a second", async () => 
   expect(second).toBe(first);
 });
 
-test("asks about each objective in order, then the lecture summary", async () => {
+test("recalls each objective, then probes what the recall left untested, one objective at a time", async () => {
   const lectureId = await seedCommittedLecture();
-  const objectives = await objectivesOf(lectureId);
+  const [first, second] = await objectivesOf(lectureId);
+  const [firstItem] = await itemsOf(first.id);
+  const [precursor, tropism] = await itemsOf(second.id);
   const sessionId = await startSameDaySession(lectureId);
-  const tutor = stubTutor(["green", "green"]);
 
-  const first = await currentTurn(sessionId, tutor);
-  expect(first?.stage).toBe("lo_recall");
-  expect(first?.loId).toBe(objectives[0].id);
-  await submitAnswer(sessionId, "An answer.", tutor);
+  // Twenty minutes on two objectives is three questions each: a recall with
+  // no marks leaves every concept untested, so the probes follow in order.
+  await playThrough(sessionId, stubTutor([]));
 
-  const second = await currentTurn(sessionId, tutor);
-  expect(second?.loId).toBe(objectives[1].id);
-  await submitAnswer(sessionId, "An answer.", tutor);
+  expect(await turnsOf(sessionId)).toEqual([
+    { stage: "lo_recall", loId: first.id, reviewItemId: null },
+    { stage: "lo_probe", loId: first.id, reviewItemId: firstItem.id },
+    { stage: "lo_recall", loId: second.id, reviewItemId: null },
+    { stage: "lo_probe", loId: second.id, reviewItemId: precursor.id },
+    { stage: "lo_probe", loId: second.id, reviewItemId: tropism.id },
+    { stage: "reflection", loId: null, reviewItemId: null },
+  ]);
+});
 
-  const third = await currentTurn(sessionId, tutor);
-  expect(third?.stage).toBe("summary");
-  expect(third?.loId).toBeNull();
+test("a recall that marks a concept green needs no probe on it", async () => {
+  const lectureId = await seedCommittedLecture();
+  const [first, second] = await objectivesOf(lectureId);
+  const [, tropism] = await itemsOf(second.id);
+  const sessionId = await startSameDaySession(lectureId);
+
+  await playThrough(
+    sessionId,
+    stubTutor([
+      { score: 5, marks: [{ number: 1, mark: "green" }] },
+      { score: 4, marks: [{ number: 1, mark: "green" }, { number: 2, mark: "yellow" }] },
+    ]),
+  );
+
+  expect(await turnsOf(sessionId)).toEqual([
+    { stage: "lo_recall", loId: first.id, reviewItemId: null },
+    { stage: "lo_recall", loId: second.id, reviewItemId: null },
+    { stage: "lo_probe", loId: second.id, reviewItemId: tropism.id },
+    { stage: "reflection", loId: null, reviewItemId: null },
+  ]);
+});
+
+test("a short budget covers a subset, stores its minutes, and a rejoin keeps them", async () => {
+  const lectureId = await seedCommittedLecture();
+  const [first] = await objectivesOf(lectureId);
+  const sessionId = await startSameDaySession(lectureId, 2);
+
+  expect(await startSameDaySession(lectureId, 60)).toBe(sessionId);
+  const session = await db.query.sessions.findFirst({ where: eq(schema.sessions.id, sessionId) });
+  expect(session?.minutes).toBe(2);
+
+  // Two minutes is one question: one objective, recall only.
+  await playThrough(sessionId, stubTutor([]));
+  expect(await turnsOf(sessionId)).toEqual([
+    { stage: "lo_recall", loId: first.id, reviewItemId: null },
+    { stage: "reflection", loId: null, reviewItemId: null },
+  ]);
 });
 
 test("the same question survives a reload instead of being regenerated", async () => {
@@ -175,57 +253,57 @@ test("the same question survives a reload instead of being regenerated", async (
   expect(attempts).toHaveLength(1);
 });
 
-test("taking a cue caps the rating at yellow even when the model says green", async () => {
+test("taking a cue caps a 5 at 4 and a green mark at yellow, whatever the model says", async () => {
   const lectureId = await seedCommittedLecture();
   const sessionId = await startSameDaySession(lectureId);
-  const tutor = stubTutor(["green"]);
+  const tutor = stubTutor([{ score: 5, marks: [{ number: 1, mark: "green" }] }]);
 
   await currentTurn(sessionId, tutor);
   const hint = await requestHint(sessionId, "Something about sheets", tutor);
   expect(hint).toMatch(/precursor/i);
 
   const feedback = await submitAnswer(sessionId, "An answer.", tutor);
-  expect(feedback?.modelRating).toBe("green");
-  expect(feedback?.rating).toBe("yellow");
+  expect(feedback?.modelScore).toBe(5);
+  expect(feedback?.score).toBe(4);
+  expect(feedback?.marks.map((m) => [m.ordinal, m.mark])).toEqual([[1, "yellow"]]);
   // Same-day turns have no selection story to tell.
   expect(feedback?.why).toBeUndefined();
 });
 
-test("an objective that scored red earns an elaboration turn; a green one does not", async () => {
+test("the lowest score of the sitting is the objective's score for the day", async () => {
   const lectureId = await seedCommittedLecture();
-  const objectives = await objectivesOf(lectureId);
+  const [first, second] = await objectivesOf(lectureId);
   const sessionId = await startSameDaySession(lectureId);
-  // objective 0 red, objective 1 green, then the summary.
-  const tutor = stubTutor(["red", "green", "green"]);
-
-  for (let i = 0; i < 3; i++) {
-    await currentTurn(sessionId, tutor);
-    await submitAnswer(sessionId, "An answer.", tutor);
-  }
-
-  const fourth = await currentTurn(sessionId, tutor);
-  expect(fourth?.stage).toBe("elaboration");
-  expect(fourth?.loId).toBe(objectives[0].id);
-});
-
-test("the worst rating of the session represents the day", async () => {
-  const lectureId = await seedCommittedLecture();
-  const objectives = await objectivesOf(lectureId);
-  const sessionId = await startSameDaySession(lectureId);
-  // Objective 0 goes red on recall, then green on elaboration.
-  const tutor = stubTutor(["red", "green", "green", "green"]);
+  // Objective 0 scores 2 on recall, then 5 on its probe.
+  const tutor = stubTutor([2, 5, 5, 5, 5]);
 
   await playThrough(sessionId, tutor);
   const result = await finishSession(sessionId, { deps: tutor });
 
-  expect(result.ratingByLo[objectives[0].id]).toBe("red");
-  expect(result.ratingByLo[objectives[1].id]).toBe("green");
+  expect(result.scoreByLo[first.id]).toBe(2);
+  expect(result.scoreByLo[second.id]).toBe(5);
 });
 
-test("finishing writes one dashboard cell per tested objective", async () => {
+test("a probe's score reaches its objective's cell", async () => {
+  const lectureId = await seedCommittedLecture();
+  const [first, second] = await objectivesOf(lectureId);
+  const sessionId = await startSameDaySession(lectureId);
+  // Objective 0: recall 5, probe 2.
+  const tutor = stubTutor([5, 2, 5, 5, 5]);
+
+  await playThrough(sessionId, tutor);
+  const result = await finishSession(sessionId, { deps: tutor });
+
+  expect(result.cellsWritten).toBe(2);
+  expect(result.scoreByLo[first.id]).toBe(2);
+  expect(result.scoreByLo[second.id]).toBe(5);
+});
+
+test("finishing writes one dashboard cell per tested objective, with its score", async () => {
   const lectureId = await seedCommittedLecture();
   const sessionId = await startSameDaySession(lectureId);
-  const tutor = stubTutor(["green", "yellow", "green", "green"]);
+  // Objective 1's recall scores 4.
+  const tutor = stubTutor([5, 5, 4, 5, 5]);
 
   await playThrough(sessionId, tutor);
   const result = await finishSession(sessionId, { deps: tutor });
@@ -244,7 +322,7 @@ test("finishing writes one dashboard cell per tested objective", async () => {
       eq(schema.performances.studyDateId, studyDate!.id),
     ),
   });
-  expect(cell?.rating).toBe("yellow");
+  expect(cell?.score).toBe(4);
 });
 
 test("an objective that was never tested gets no cell at all", async () => {
@@ -258,7 +336,7 @@ test("an objective that was never tested gets no cell at all", async () => {
     .where(eq(schema.learningObjectives.id, objectives[1].id));
 
   const sessionId = await startSameDaySession(lectureId);
-  const tutor = stubTutor(["green", "green"]);
+  const tutor = stubTutor([]);
 
   await playThrough(sessionId, tutor);
   const result = await finishSession(sessionId, { deps: tutor });
@@ -271,83 +349,101 @@ test("an objective that was never tested gets no cell at all", async () => {
   expect(cells).toHaveLength(0);
 });
 
-test("review items move on to the interval their objective earned", async () => {
+test("each concept the sitting marked moves on the ladder and is recorded for the day; an untested one stays put", async () => {
   const lectureId = await seedCommittedLecture();
-  const objectives = await objectivesOf(lectureId);
-  const sessionId = await startSameDaySession(lectureId);
-  // Objective 0 green, objective 1 red, summary green, elaboration on 1 green.
-  const tutor = stubTutor(["green", "red", "green", "green"]);
+  const [first, second] = await objectivesOf(lectureId);
+  const [sheet] = await itemsOf(first.id);
+  const [precursor, tropism] = await itemsOf(second.id);
+  // Eight minutes: two objectives, two questions each, so one probe at most.
+  const sessionId = await startSameDaySession(lectureId, 8);
+  // Objective 0's recall marks its concept green; objective 1's recall marks
+  // nothing and scores 2, so its first concept is probed and fails.
+  const tutor = stubTutor([{ score: 5, marks: [{ number: 1, mark: "green" }] }, 2, 2]);
 
   await playThrough(sessionId, tutor);
   const result = await finishSession(sessionId, { deps: tutor });
 
   expect(result.reviewItemsRescheduled).toBe(2);
 
-  const [greenItem] = await db.query.reviewItems.findMany({
-    where: eq(schema.reviewItems.loId, objectives[0].id),
-  });
-  const [redItem] = await db.query.reviewItems.findMany({
-    where: eq(schema.reviewItems.loId, objectives[1].id),
-  });
+  const [sheetAfter] = await itemsOf(first.id);
+  const [precursorAfter, tropismAfter] = await itemsOf(second.id);
 
   // Green walks 0 -> 1; red returns tomorrow and counts a lapse.
-  expect(greenItem.intervalDays).toBe(1);
-  expect(greenItem.lastRating).toBe("green");
-  expect(redItem.intervalDays).toBe(1);
-  expect(redItem.lapses).toBe(1);
-  expect(redItem.lastRating).toBe("red");
-  expect(greenItem.streak).toBe(1);
-  expect(redItem.streak).toBe(0);
+  expect(sheetAfter).toMatchObject({ intervalDays: 1, streak: 1, lapses: 0, lastRating: "green" });
+  expect(precursorAfter).toMatchObject({ intervalDays: 1, streak: 0, lapses: 1, lastRating: "red" });
+  // Never marked, never moved.
+  expect(tropismAfter).toMatchObject({ intervalDays: 0, lapses: 0, lastRating: null, dueOn: todayIso() });
 
-  // What finishing did to each item, in the order the runner walked them.
-  expect(result.outcomes).toHaveLength(2);
+  // What finishing did to each item, and the same array on the session row.
   const outcomeFor = (id: number) => result.outcomes.find((o) => o.reviewItemId === id);
-  expect(outcomeFor(greenItem.id)).toEqual({
-    reviewItemId: greenItem.id,
-    concept: greenItem.concept,
-    rating: "green",
+  expect(outcomeFor(sheet.id)).toEqual({
+    reviewItemId: sheet.id,
+    concept: sheet.concept,
+    mark: "green",
     tierBefore: "new",
     tierAfter: "consolidating",
-    dueOn: greenItem.dueOn,
+    dueOn: sheetAfter.dueOn,
   });
-  expect(outcomeFor(redItem.id)?.tierAfter).toBe("relearning");
-
+  expect(outcomeFor(precursor.id)?.tierAfter).toBe("relearning");
+  expect(outcomeFor(tropism.id)).toBeUndefined();
   const session = await db.query.sessions.findFirst({
     where: eq(schema.sessions.id, sessionId),
   });
   expect(session!.outcomes).toEqual(result.outcomes);
+
+  // The day's concept marks: the LO Map's coloured numbers.
+  const studyDate = await db.query.studyDates.findFirst({
+    where: eq(schema.studyDates.date, todayIso()),
+  });
+  const marks = await db.query.conceptMarks.findMany({
+    where: eq(schema.conceptMarks.studyDateId, studyDate!.id),
+  });
+  const markFor = (id: number) => marks.find((m) => m.reviewItemId === id)?.mark;
+  expect(markFor(sheet.id)).toBe("green");
+  expect(markFor(precursor.id)).toBe("red");
+  expect(markFor(tropism.id)).toBeUndefined();
 });
 
-test("a second session the same day keeps the worst rating, not the latest", async () => {
+test("a second session the same day keeps the lowest score and the worst mark, not the latest", async () => {
   const lectureId = await seedCommittedLecture();
-  const objectives = await objectivesOf(lectureId);
+  const [first] = await objectivesOf(lectureId);
+  const [sheet] = await itemsOf(first.id);
 
-  const first = await startSameDaySession(lectureId);
-  const firstTutor = stubTutor(["red", "red", "green", "green", "green"]);
-  await playThrough(first, firstTutor);
-  await finishSession(first, { deps: firstTutor });
+  const one = await startSameDaySession(lectureId);
+  // The recall scores 2 and marks the concept red; its probe then goes green.
+  const oneTutor = stubTutor([{ score: 2, marks: [{ number: 1, mark: "red" }] }, 5, 5, 5, 5]);
+  await playThrough(one, oneTutor);
+  await finishSession(one, { deps: oneTutor });
 
-  const second = await startSameDaySession(lectureId);
-  expect(second).not.toBe(first);
-  const secondTutor = stubTutor(["green", "green", "green"]);
-  await playThrough(second, secondTutor);
-  await finishSession(second, { deps: secondTutor });
+  const two = await startSameDaySession(lectureId);
+  expect(two).not.toBe(one);
+  const twoTutor = stubTutor([
+    { score: 5, marks: [{ number: 1, mark: "green" }] },
+    { score: 5, marks: [{ number: 1, mark: "green" }, { number: 2, mark: "green" }] },
+  ]);
+  await playThrough(two, twoTutor);
+  await finishSession(two, { deps: twoTutor });
 
   const cells = await db.query.performances.findMany({
-    where: eq(schema.performances.loId, objectives[0].id),
+    where: eq(schema.performances.loId, first.id),
   });
-
-  // Still one cell for the day, and still red: a green that follows a red is
-  // recall of the correction just given, whether or not a session boundary
-  // falls between them.
+  // Still one cell for the day, and still 2: a 5 that follows a 2 is recall
+  // of the correction just given, whether or not a session boundary falls
+  // between them.
   expect(cells).toHaveLength(1);
-  expect(cells[0].rating).toBe("red");
+  expect(cells[0].score).toBe(2);
+
+  const marks = await db.query.conceptMarks.findMany({
+    where: eq(schema.conceptMarks.reviewItemId, sheet.id),
+  });
+  expect(marks).toHaveLength(1);
+  expect(marks[0].mark).toBe("red");
 });
 
 test("a finished session cannot be finished again", async () => {
   const lectureId = await seedCommittedLecture();
   const sessionId = await startSameDaySession(lectureId);
-  const tutor = stubTutor(["green", "green", "green"]);
+  const tutor = stubTutor([]);
 
   await playThrough(sessionId, tutor);
   await finishSession(sessionId, { deps: tutor });
@@ -364,32 +460,17 @@ test("answering when nothing was asked is an error, not a silent no-op", async (
   ).rejects.toThrow(/no question/i);
 });
 
-test("the summary turn contributes no dashboard cell", async () => {
-  const lectureId = await seedCommittedLecture();
-  const sessionId = await startSameDaySession(lectureId);
-  const tutor = stubTutor(["green", "green", "red"]);
-
-  await playThrough(sessionId, tutor);
-  const result = await finishSession(sessionId, { deps: tutor });
-
-  // The summary scored red, but it names no objective, so only the two
-  // green recall turns reach the dashboard.
-  expect(result.cellsWritten).toBe(2);
-  expect(Object.values(result.ratingByLo)).toEqual(["green", "green"]);
-});
-
 test("the session closes with an ungraded reflection turn", async () => {
   const lectureId = await seedCommittedLecture();
   const sessionId = await startSameDaySession(lectureId);
-  const tutor = stubTutor(["green", "green", "green"]);
+  const tutor = stubTutor([]);
 
-  // Two recalls and the summary, all green: nothing to elaborate.
-  for (let i = 0; i < 3; i++) {
-    await currentTurn(sessionId, tutor);
+  let reflection = await currentTurn(sessionId, tutor);
+  for (let guard = 0; reflection && reflection.stage !== "reflection" && guard < 10; guard++) {
     await submitAnswer(sessionId, "An answer.", tutor);
+    reflection = await currentTurn(sessionId, tutor);
   }
 
-  const reflection = await currentTurn(sessionId, tutor);
   expect(reflection?.stage).toBe("reflection");
   expect(reflection?.loId).toBeNull();
   expect(reflection?.question).toMatch(/key ideas/i);
@@ -405,19 +486,19 @@ test("the session closes with an ungraded reflection turn", async () => {
   });
   const last = attempts[attempts.length - 1];
   expect(last.stage).toBe("reflection");
-  expect(last.rating).toBeNull();
+  expect(last.score).toBeNull();
   expect(last.studentAnswer).toMatch(/precursor/);
 
   // No cell, no item moved, no question asked of the model for it.
   const result = await finishSession(sessionId, { deps: tutor });
   expect(result.cellsWritten).toBe(2);
-  expect(result.reviewItemsRescheduled).toBe(2);
+  expect(result.reviewItemsRescheduled).toBe(3);
 });
 
 test("a same-day session gets a debrief too", async () => {
   const lectureId = await seedCommittedLecture();
   const sessionId = await startSameDaySession(lectureId);
-  const tutor = stubTutor(["green", "green", "green"]);
+  const tutor = stubTutor([]);
 
   await playThrough(sessionId, tutor);
   const result = await finishSession(sessionId, { deps: tutor });
@@ -428,4 +509,34 @@ test("a same-day session gets a debrief too", async () => {
     where: eq(schema.sessions.id, sessionId),
   });
   expect((session!.debrief as { heldUp: string[] }).heldUp).toEqual(["Fibril structure"]);
+});
+
+test("the tutor sees each objective's numbered concepts, its practice questions, and a first-order probe", async () => {
+  const lectureId = await seedCommittedLecture();
+  const [, second] = await objectivesOf(lectureId);
+  const sessionId = await startSameDaySession(lectureId);
+
+  const contexts: Parameters<TutorDeps["askQuestion"]>[0][] = [];
+  const base = stubTutor([]);
+  const tutor: TutorDeps = {
+    ...base,
+    askQuestion: async (context) => {
+      contexts.push(context);
+      return base.askQuestion(context);
+    },
+  };
+  await playThrough(sessionId, tutor);
+
+  const recall = contexts.find((c) => c.stage === "lo_recall" && c.objective === second.text)!;
+  expect(recall.concepts.map((c) => [c.ordinal, c.concept.split(" — ")[0]])).toEqual([
+    [1, "AL vs ATTR precursor"],
+    [2, "Organ tropism"],
+  ]);
+  expect(recall.practiceQuestions?.[0].question).toBe("Name the precursor protein in AL amyloidosis.");
+  expect(recall.order).toBeUndefined();
+
+  const probe = contexts.find((c) => c.stage === "lo_probe" && c.objective === second.text)!;
+  expect(probe.targetConcept).toMatch(/^AL vs ATTR precursor/);
+  expect(probe.order).toBe("first");
+  expect(probe.allowedFormats).toEqual(["mechanism", "pathway", "consequence"]);
 });

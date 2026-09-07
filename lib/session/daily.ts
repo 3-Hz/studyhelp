@@ -1,8 +1,12 @@
-import { and, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
-import type { Rating } from "@/lib/db/schema";
 import { startOfToday, tierOf, todayIso } from "@/lib/schedule";
-import type { ConceptContext, PriorAttempt, QuestionFormat } from "@/lib/tutor";
+import type {
+  ConceptContext,
+  PracticeQuestionContext,
+  PriorAttempt,
+  QuestionFormat,
+} from "@/lib/tutor";
 import { dailyBudget, DEFAULT_MINUTES } from "./budget";
 import { dailyCandidates } from "./candidates";
 import type { SessionKind } from "./kind";
@@ -28,6 +32,8 @@ export interface DailyMaterial {
   lectureTitleById: Map<number, string>;
   siblingsByLo: Map<number, ReviewItemRow[]>;
   priorByItem: Map<number, PriorAttempt>;
+  /** The lectures' own questions, by the objective they serve. */
+  practiceByLo: Map<number, PracticeQuestionContext[]>;
 }
 
 export async function startDailySession(
@@ -114,6 +120,18 @@ export const dailyKind: SessionKind<DailyMaterial> = {
 
     const priorByItem = await priorAttempts(session.id, plan);
 
+    const questions = await db.query.practiceQuestions.findMany({
+      where: inArray(schema.practiceQuestions.loId, loIds),
+      orderBy: [asc(schema.practiceQuestions.id)],
+    });
+    const practiceByLo = new Map<number, PracticeQuestionContext[]>();
+    for (const question of questions) {
+      if (question.loId === null) continue;
+      const list = practiceByLo.get(question.loId) ?? [];
+      list.push({ question: question.question, answer: question.answer });
+      practiceByLo.set(question.loId, list);
+    }
+
     return {
       plan,
       itemById: new Map([...planned, ...siblings].map((item) => [item.id, item])),
@@ -121,6 +139,7 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       lectureTitleById: new Map(lectures.map((lecture) => [lecture.id, lecture.title])),
       siblingsByLo,
       priorByItem,
+      practiceByLo,
     };
   },
 
@@ -181,6 +200,7 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       kind: row.kind,
       provenance: row.provenance,
       ordinal: row.ordinal,
+      reviewItemId: row.id,
     });
 
     // The objective's concepts in their numbered order, the target among them.
@@ -199,18 +219,11 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       ...(item && material.priorByItem.has(item.id)
         ? { lastAttempt: material.priorByItem.get(item.id) }
         : {}),
+      ...(material.practiceByLo.has(objective.id)
+        ? { practiceQuestions: material.practiceByLo.get(objective.id) }
+        : {}),
       concepts,
     };
-  },
-
-  itemOutcomes(attempts) {
-    // One question, one item: the concept asked is the concept that moves.
-    const outcomes = new Map<number, Rating>();
-    for (const attempt of attempts) {
-      if (attempt.rating === null || attempt.reviewItemId === null) continue;
-      outcomes.set(attempt.reviewItemId, attempt.rating);
-    }
-    return outcomes;
   },
 
   progress(material, attempts) {

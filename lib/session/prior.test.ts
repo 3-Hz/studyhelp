@@ -15,7 +15,7 @@ const { currentTurn, finishSession, submitAnswer } = await import("./runner");
 const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
 
 type TutorDeps = NonNullable<Parameters<typeof currentTurn>[1]>;
-type Rating = "green" | "yellow" | "red";
+type Score = 1 | 2 | 3 | 4 | 5;
 
 /** One lecture, one objective, one concept: every daily plan is this one item. */
 const draft = {
@@ -34,18 +34,16 @@ const draft = {
   conflicts: [],
 };
 
-const SCORE_FOR = { green: 5, yellow: 4, red: 2 } as const;
-
-/** Grades from a script, and reports the same `missing` on every grade. */
-function stubTutor(ratings: Rating[], missing: string[] = []): TutorDeps {
-  const queue = [...ratings];
+/** Grades from a script of scores, and reports the same `missing` on every grade. */
+function stubTutor(scores: Score[], missing: string[] = []): TutorDeps {
+  const queue = [...scores];
   return {
     askQuestion: async (context) => ({
       format: context.allowedFormats?.[0] ?? "free_recall",
       question: `Question about ${context.targetConcept ?? context.objective ?? "the lecture"}`,
     }),
     gradeAnswer: async () => ({
-      score: SCORE_FOR[queue.shift() ?? "green"],
+      score: queue.shift() ?? 5,
       conceptMarks: [],
       correct: [],
       missing,
@@ -99,17 +97,19 @@ test("an item nobody has attempted carries nothing", async () => {
   expect((await priorAttempts(0, slots)).size).toBe(0);
 });
 
-test("a same-day turn on the objective is the fallback, marked as such", async () => {
-  const tutor = stubTutor(["red", "green", "green"], ["The precursor protein"]);
-  const sessionId = await startSameDaySession(lectureId);
+test("a same-day recall of the objective is the fallback, marked as such", async () => {
+  const tutor = stubTutor([2], ["The precursor protein"]);
+  // Two minutes: the recall alone, with no probe to count as a direct attempt.
+  const sessionId = await startSameDaySession(lectureId, 2);
   await playThrough(sessionId, tutor);
   await finishSession(sessionId, { deps: tutor });
 
   const prior = (await priorAttempts(0, slots)).get(slots[0].reviewItemId);
-  // The latest graded turn on the objective is the elaboration, rated green.
+  // The recall marked nothing, so the concept has a score but no mark.
   expect(prior).toEqual({
     daysAgo: 0,
-    rating: "green",
+    score: 2,
+    mark: null,
     hintsUsed: false,
     missing: ["The precursor protein"],
     incorrect: [],
@@ -119,18 +119,20 @@ test("a same-day turn on the objective is the fallback, marked as such", async (
 });
 
 test("a direct attempt on the item beats the objective's, and the current session is excluded", async () => {
-  const direct = stubTutor(["yellow"], ["Organ tropism"]);
+  const direct = stubTutor([4], ["Organ tropism"]);
   const sessionId = await startDailySession();
   await playThrough(sessionId, direct);
   await finishSession(sessionId, { deps: direct });
 
   const seen = (await priorAttempts(0, slots)).get(slots[0].reviewItemId);
   expect(seen?.aboutObjective).toBe(false);
-  expect(seen?.rating).toBe("yellow");
+  expect(seen?.score).toBe(4);
+  // The target concept is always marked: a 4 the grader left unmarked is yellow.
+  expect(seen?.mark).toBe("yellow");
   expect(seen?.missing).toEqual(["Organ tropism"]);
 
   // A session in progress must not see its own graded turn as "last time".
-  const inProgress = stubTutor(["red"], ["In progress"]);
+  const inProgress = stubTutor([2], ["In progress"]);
   const openId = await startDailySession();
   await currentTurn(openId, inProgress);
   await submitAnswer(openId, "An answer.", inProgress);

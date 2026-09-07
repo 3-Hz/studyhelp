@@ -1,5 +1,5 @@
 import type * as schema from "@/lib/db/schema";
-import type { Rating, SessionStage } from "@/lib/db/schema";
+import type { ConceptMark, Mark, SessionStage } from "@/lib/db/schema";
 import type { QuestionOrder, Tier } from "@/lib/schedule";
 import type { QuestionFormat, TurnContext } from "@/lib/tutor";
 import type {
@@ -44,10 +44,17 @@ export interface Outcome {
   reviewItemId: number;
   /** Snapshotted: the concept as it was asked, so a finished session needs no join. */
   concept: string;
-  rating: Rating;
+  /** The sitting's worst mark for the concept, which is what moved it. */
+  mark: Mark;
   tierBefore: Tier;
   tierAfter: Tier;
   dueOn: string;
+}
+
+/** A mark as the feedback shows it: numbered and named, not just an id. */
+export interface MarkedConcept extends ConceptMark {
+  ordinal: number;
+  concept: string;
 }
 
 /**
@@ -81,9 +88,6 @@ export interface SessionKind<M> {
 
   /** What the tutor sees, whether asking, grading or cueing. */
   turnContext(turn: TurnRef, material: M): TurnContext;
-
-  /** Which review items move on finishing, and on what rating. */
-  itemOutcomes(attempts: AttemptRow[], material: M): Map<number, Rating>;
 
   /** Where the student is. Omitted when the length is not known in advance. */
   progress?(material: M, attempts: AttemptRow[]): { position: number; total: number | null };

@@ -101,12 +101,12 @@ test("a committed lecture contributes one candidate per objective, carrying its 
   await db.insert(schema.performances).values({
     loId: objective!.id,
     studyDateId: later.id,
-    rating: "green",
+    score: 5,
   });
   await db.insert(schema.performances).values({
     loId: objective!.id,
     studyDateId: earlier.id,
-    rating: "red",
+    score: 2,
   });
 
   const item = await db.query.reviewItems.findFirst({

@@ -2,17 +2,18 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Rating } from "@/lib/db/schema";
+import type { Score } from "@/lib/db/schema";
 import { todayIso } from "@/lib/schedule";
-import type { Outcome, TurnWhy } from "@/lib/session/kind";
+import type { MarkedConcept, Outcome, TurnWhy } from "@/lib/session/kind";
 import type { Bucket } from "@/lib/session/select";
 import type { DebriefOutput, GradeOutput } from "@/lib/tutor/schema";
+import { MARK_LABEL, MARK_STYLE, SCORE_LABEL, SCORES_DESC, scoreStyle } from "@/app/components/scores";
 import { Debrief } from "./Debrief";
 import { Outcomes } from "./Outcomes";
 
 interface Turn {
   attemptId: number;
-  stage: "lo_recall" | "summary" | "elaboration" | "daily" | "reflection";
+  stage: "lo_recall" | "lo_probe" | "daily" | "reflection";
   loId: number | null;
   objective: string | null;
   lectureTitle: string | null;
@@ -24,16 +25,23 @@ interface Turn {
 }
 
 interface Feedback {
-  rating: Rating;
-  modelRating: Rating;
+  score: Score;
+  modelScore: Score;
+  marks: MarkedConcept[];
   grade: GradeOutput;
   why?: TurnWhy;
 }
 
+interface Finished {
+  cellsWritten: number;
+  debrief: DebriefOutput | null;
+  scoreByLo: Record<number, Score>;
+  outcomes: Outcome[];
+}
+
 const STAGE_LABEL: Record<Turn["stage"], string> = {
   lo_recall: "Objective recall",
-  summary: "Lecture summary",
-  elaboration: "Elaboration",
+  lo_probe: "Concept probe",
   daily: "Daily practice",
   reflection: "Reflection",
 };
@@ -42,7 +50,7 @@ const BUCKET_LABEL: Record<Bucket, string> = {
   due: "Due for review",
   recent: "Recent material",
   weak: "Weak spot",
-  interleaved: "Cumulative",
+  interleaved: "Another lecture",
   fill: "Extra practice",
 };
 
@@ -56,7 +64,9 @@ function monthDay(iso: string): string {
 /** One line: why this question was shaped as it was. Rendered after grading only. */
 function whyLine(why: TurnWhy): string {
   const today = todayIso();
-  const parts = [BUCKET_LABEL[why.bucket], why.tier];
+  const parts = [BUCKET_LABEL[why.bucket]];
+  if (why.order) parts.push(`${why.order}-order`);
+  parts.push(why.tier);
   if (why.lapses > 0) parts.push(`lapsed ${why.lapses}×`);
   if (why.streak > 0) parts.push(`${why.streak} green in a row`);
   parts.push(why.intervalDays === 0 ? "first review" : `was on a ${why.intervalDays}-day interval`);
@@ -69,20 +79,6 @@ function whyLine(why: TurnWhy): string {
   );
   return parts.join(" · ");
 }
-
-const RATING_STYLE: Record<Rating, string> = {
-  green: "bg-emerald-500 text-white",
-  yellow: "bg-amber-400 text-stone-900",
-  red: "bg-red-500 text-white",
-  suspended: "bg-emerald-900 text-white",
-};
-
-const RATING_LABEL: Record<Rating, string> = {
-  green: "Green — independent, complete recall",
-  yellow: "Yellow — partial, or needed hints",
-  red: "Red — not recalled, or a misconception",
-  suspended: "Suspended",
-};
 
 async function post<T>(url: string, body: unknown): Promise<T> {
   const response = await fetch(url, {
@@ -110,14 +106,7 @@ export default function SessionTurn({
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [busy, setBusy] = useState<null | "loading" | "grading" | "hinting" | "finishing">("loading");
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<
-    {
-      cellsWritten: number;
-      debrief: DebriefOutput | null;
-      ratingByLo: Record<number, Rating>;
-      outcomes: Outcome[];
-    } | null
-  >(null);
+  const [result, setResult] = useState<Finished | null>(null);
 
   // Two effect passes in development would otherwise fire two turn requests.
   const loading = useRef(false);
@@ -193,12 +182,7 @@ export default function SessionTurn({
     setBusy("finishing");
     setError(null);
     try {
-      const finished = await post<{
-        cellsWritten: number;
-        debrief: DebriefOutput | null;
-        ratingByLo: Record<number, Rating>;
-        outcomes: Outcome[];
-      }>(`/api/sessions/${sessionId}/finish`, {});
+      const finished = await post<Finished>(`/api/sessions/${sessionId}/finish`, {});
       setResult(finished);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not finish.");
@@ -217,9 +201,10 @@ export default function SessionTurn({
         <h2 className="text-lg font-medium">Recorded.</h2>
         <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
           {result.cellsWritten} dashboard cell
-          {result.cellsWritten === 1 ? "" : "s"} written for today.
+          {result.cellsWritten === 1 ? "" : "s"} written for today, and{" "}
+          {result.outcomes.length} concept{result.outcomes.length === 1 ? "" : "s"} marked.
         </p>
-        <ColorTally ratingByLo={result.ratingByLo} />
+        <ScoreTally scoreByLo={result.scoreByLo} />
         {sessionType === "daily" && <Outcomes outcomes={result.outcomes} />}
         {result.debrief && <Debrief debrief={result.debrief} />}
         <Link href="/dashboard" className="mt-6 inline-block text-sm underline">
@@ -233,16 +218,12 @@ export default function SessionTurn({
     return (
       <div className="mt-8">
         <h2 className="text-lg font-medium">
-          {sessionType === "daily" ? "That is today's ten." : "That is the whole lecture."}
+          {sessionType === "daily" ? "That is today's practice." : "That is the lecture for today."}
         </h2>
         <p className="mt-2 max-w-xl text-sm text-stone-600 dark:text-stone-400">
-          Finishing records one dashboard cell per objective — the worst rating
-          it earned today
-          {sessionType === "daily"
-            ? // Daily moves only the concept asked, one review item at a time —
-              // the point of the concept-level ladder (see daily.test.ts).
-              "."
-            : " — and schedules everything beneath it for review."}
+          Finishing records one dashboard cell per objective — the lowest score
+          it earned today — and marks each concept the sitting tested. A
+          concept never tested is left as it was.
         </p>
         {error && <ErrorNote message={error} />}
         <button
@@ -352,7 +333,7 @@ export default function SessionTurn({
 
           {turn.stage !== "reflection" && (
             <p className="mt-2 text-xs text-stone-500">
-              A cue caps this answer at yellow — hinted recall is not independent
+              A cue caps this answer at 4 — correct with help is not independent
               recall.
             </p>
           )}
@@ -364,27 +345,27 @@ export default function SessionTurn({
   );
 }
 
-/** How many objectives landed on each colour today — the design doc's promised tally. */
-function ColorTally({ ratingByLo }: { ratingByLo: Record<number, Rating> }) {
-  const ratings = Object.values(ratingByLo);
-  if (ratings.length === 0) return null;
+/** How many objectives landed on each score today. */
+function ScoreTally({ scoreByLo }: { scoreByLo: Record<number, Score> }) {
+  const scores = Object.values(scoreByLo);
+  if (scores.length === 0) return null;
 
-  const counts = (["green", "yellow", "red"] as const).map((rating) => ({
-    rating,
-    count: ratings.filter((r) => r === rating).length,
+  const counts = SCORES_DESC.map((score) => ({
+    score,
+    count: scores.filter((s) => s === score).length,
   }));
 
   return (
     <div className="mt-3 flex flex-wrap gap-2">
       {counts.map(
-        ({ rating, count }) =>
+        ({ score, count }) =>
           count > 0 && (
             <span
-              key={rating}
-              title={RATING_LABEL[rating]}
-              className={`rounded px-2 py-0.5 text-xs font-medium ${RATING_STYLE[rating]}`}
+              key={score}
+              title={SCORE_LABEL[score]}
+              className={`rounded px-2 py-0.5 text-xs font-medium ${scoreStyle(score)}`}
             >
-              {count} {rating}
+              {count} × {score}
             </span>
           ),
       )}
@@ -399,7 +380,7 @@ function FeedbackPanel({
   feedback: Feedback;
   onContinue: () => Promise<void>;
 }) {
-  const { grade, rating, modelRating } = feedback;
+  const { grade, score, modelScore, marks } = feedback;
 
   return (
     <div className="mt-6 rounded-lg border border-stone-200 p-5 dark:border-stone-800">
@@ -408,16 +389,30 @@ function FeedbackPanel({
       )}
       <div className="flex flex-wrap items-center gap-3">
         <span
-          className={`rounded px-2 py-0.5 text-xs font-medium ${RATING_STYLE[rating]}`}
+          className={`rounded px-2 py-0.5 text-xs font-medium ${scoreStyle(score)}`}
         >
-          {RATING_LABEL[rating]}
+          {SCORE_LABEL[score]}
         </span>
-        {rating !== modelRating && (
+        {score !== modelScore && (
           <span className="text-xs text-stone-500">
-            capped from {modelRating} — you took a cue
+            capped from {modelScore} — you took a cue
           </span>
         )}
       </div>
+
+      {marks.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {marks.map((marked) => (
+            <span
+              key={marked.reviewItemId}
+              title={`${marked.concept} — ${MARK_LABEL[marked.mark]}`}
+              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${MARK_STYLE[marked.mark]}`}
+            >
+              {marked.ordinal > 0 ? `#${marked.ordinal}` : "concept"} {marked.mark}
+            </span>
+          ))}
+        </div>
+      )}
 
       <FeedbackList title="Correct" items={grade.correct} />
       <FeedbackList title="Missing" items={grade.missing} />

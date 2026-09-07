@@ -1,6 +1,6 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
-import type { Provenance, Rating, ReviewKind } from "@/lib/db/schema";
+import type { Mark, Provenance, ReviewKind } from "@/lib/db/schema";
 import { daysBetween, tierOf, todayIso, type Tier } from "@/lib/schedule";
 
 export interface ConceptRow {
@@ -12,7 +12,7 @@ export interface ConceptRow {
   intervalDays: number;
   lapses: number;
   streak: number;
-  lastRating: Rating | null;
+  lastRating: Mark | null;
   dueOn: string;
   /** Days until due; negative when overdue. */
   dueIn: number;

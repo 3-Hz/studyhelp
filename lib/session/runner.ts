@@ -1,14 +1,15 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
-import type { Rating } from "@/lib/db/schema";
+import type { ConceptMark, Mark, Score } from "@/lib/db/schema";
 import {
   band,
+  capMark,
   capScore,
+  minScoreByLo,
   nextSchedule,
   tierOf,
   todayIso,
-  worstByLo,
-  worstRating,
+  worstMark,
 } from "@/lib/schedule";
 import {
   askQuestion,
@@ -17,17 +18,28 @@ import {
   summariseSession,
   type DebriefOutput,
   type DebriefRequest,
+  type GradeOutput,
   type QuestionFormat,
+  type TurnContext,
 } from "@/lib/tutor";
-import type { AttemptRow, Outcome, SessionKind, SessionRow, TurnWhy, TutorDeps } from "./kind";
+import type {
+  AttemptRow,
+  MarkedConcept,
+  Outcome,
+  SessionKind,
+  SessionRow,
+  TurnWhy,
+  TutorDeps,
+} from "./kind";
 import { sameDayKind } from "./sameDay";
 
 /**
  * The parts of a session that do not depend on which flavour it is.
  *
- * Code owns the pacing, the ratings that reach the dashboard, and when items
- * come back. The model only asks, grades and explains — and its rating is
- * advisory until capRating has had the last word.
+ * Code owns the pacing, the scores that reach the dashboard, the marks that
+ * reach the concepts, and when items come back. The model only asks, grades
+ * and explains — and its score and marks are advisory until capScore and
+ * capMark have had the last word.
  */
 
 export type { TutorDeps } from "./kind";
@@ -111,7 +123,7 @@ function toTurn(
         );
 
   const progress = loaded.kind.progress?.(loaded.material, loaded.attempts) ?? {
-    position: loaded.attempts.filter((a) => a.rating !== null).length + 1,
+    position: loaded.attempts.filter((a) => a.score !== null).length + 1,
     total: null,
   };
 
@@ -192,12 +204,59 @@ export async function currentTurn(
 }
 
 export interface TurnFeedback {
-  rating: Rating;
-  /** The model's rating before capRating. Differs only when a cue was taken. */
-  modelRating: Rating;
-  grade: Awaited<ReturnType<typeof gradeAnswer>>;
+  /** The question's score, after capScore. */
+  score: Score;
+  /** The model's score before capScore. Differs only when a cue was taken. */
+  modelScore: Score;
+  /** The concepts this answer marked, after capMark. */
+  marks: MarkedConcept[];
+  grade: GradeOutput;
   /** Why the turn was shaped as it was. Daily turns only. */
   why?: TurnWhy;
+}
+
+/**
+ * The marks an answer earned, by concept: the grader's numbered marks mapped
+ * through the turn's concepts and capped for a cue, with the target concept
+ * guaranteed a mark — its score's band when the grader left it out. A
+ * concept the grader named twice keeps its worse mark.
+ */
+export function marksFor(
+  grade: GradeOutput,
+  context: TurnContext,
+  targetItemId: number | null,
+  score: Score,
+  hintsUsed: boolean,
+): MarkedConcept[] {
+  const byItem = new Map<number, MarkedConcept>();
+
+  for (const { number, mark } of grade.conceptMarks) {
+    const concept = context.concepts.find(
+      (c) => c.ordinal === number && c.reviewItemId !== undefined,
+    );
+    if (!concept?.reviewItemId) continue;
+
+    const capped = capMark(mark, hintsUsed);
+    const current = byItem.get(concept.reviewItemId);
+    byItem.set(concept.reviewItemId, {
+      reviewItemId: concept.reviewItemId,
+      ordinal: number,
+      concept: concept.concept,
+      mark: current ? worstMark([current.mark, capped])! : capped,
+    });
+  }
+
+  if (targetItemId !== null && !byItem.has(targetItemId)) {
+    const target = context.concepts.find((c) => c.reviewItemId === targetItemId);
+    byItem.set(targetItemId, {
+      reviewItemId: targetItemId,
+      ordinal: target?.ordinal ?? 0,
+      concept: target?.concept ?? context.targetConcept ?? "",
+      mark: band(score),
+    });
+  }
+
+  return [...byItem.values()];
 }
 
 export async function submitAnswer(
@@ -230,16 +289,18 @@ export async function submitAnswer(
   });
 
   const score = capScore(grade.score, pending.hintsUsed);
-  const rating = band(score);
+  const marks = marksFor(grade, context, pending.reviewItemId, score, pending.hintsUsed);
+  const stored: ConceptMark[] = marks.map(({ reviewItemId, mark }) => ({ reviewItemId, mark }));
 
   await db
     .update(schema.attempts)
-    .set({ studentAnswer: answer, rating, score, feedback: JSON.stringify(grade) })
+    .set({ studentAnswer: answer, score, conceptMarks: stored, feedback: JSON.stringify(grade) })
     .where(eq(schema.attempts.id, pending.id));
 
   return {
-    rating,
-    modelRating: band(grade.score),
+    score,
+    modelScore: grade.score,
+    marks,
     grade,
     why: loaded.kind.explain?.(pending, loaded.material),
   };
@@ -247,7 +308,7 @@ export async function submitAnswer(
 
 /**
  * A cue for the question in hand. Taking one is recorded on the attempt, which
- * is what later caps the rating at yellow.
+ * is what later caps the score at 4 and a green mark at yellow.
  */
 export async function requestHint(
   sessionId: number,
@@ -283,7 +344,7 @@ export interface SessionResult {
   /** One dashboard cell per objective actually tested. */
   cellsWritten: number;
   reviewItemsRescheduled: number;
-  ratingByLo: Record<number, Rating>;
+  scoreByLo: Record<number, Score>;
   /** Null when the session has no close-out, or the summary call failed. */
   debrief: DebriefOutput | null;
   /** One entry per review item that moved, in the order they were walked. */
@@ -314,9 +375,24 @@ function debriefRequest(attempts: AttemptRow[]): DebriefRequest {
   return { answered, reflection };
 }
 
+/** Each concept's worst mark across a sitting's graded turns. */
+function marksOf(attempts: AttemptRow[]): Map<number, Mark> {
+  const worst = new Map<number, Mark>();
+  for (const attempt of attempts) {
+    for (const { reviewItemId, mark } of attempt.conceptMarks ?? []) {
+      const current = worst.get(reviewItemId);
+      worst.set(reviewItemId, current ? worstMark([current, mark])! : mark);
+    }
+  }
+  return worst;
+}
+
 /**
  * Closes the session and writes the day: one dashboard cell per tested
- * objective, and a new due date for every review item the flavour says moved.
+ * objective with its lowest score, one mark per concept the sitting tested
+ * with its worst mark, and a new due date for each of those concepts. A
+ * concept the sitting never marked is left unchanged — new_prompt.txt's
+ * "leave untested concept numbers unchanged".
  */
 export async function finishSession(
   sessionId: number,
@@ -332,54 +408,63 @@ export async function finishSession(
 
   const today = todayIso(now);
 
-  // A turn with no loId — the lecture summary — assessed the lecture, not an
-  // objective, so it earns no cell.
-  const ratingByLo: Record<number, Rating> = Object.fromEntries(
-    worstByLo(loaded.attempts),
-  );
+  // The reflection has no loId: it is about the session, and earns no cell.
+  const scoreByLo: Record<number, Score> = Object.fromEntries(minScoreByLo(loaded.attempts));
+  const testedLoIds = Object.keys(scoreByLo).map(Number);
+  const marks = marksOf(loaded.attempts);
 
-  const testedLoIds = Object.keys(ratingByLo).map(Number);
+  const studyDateId =
+    testedLoIds.length > 0 || marks.size > 0 ? await studyDateFor(today) : null;
 
-  if (testedLoIds.length > 0) {
-    const studyDateId = await studyDateFor(today);
+  for (const loId of testedLoIds) {
+    // Merge with whatever is already in today's cell rather than replacing
+    // it. Two sessions can share a date, and the cell describes the day.
+    const existing = await db.query.performances.findFirst({
+      where: and(
+        eq(schema.performances.loId, loId),
+        eq(schema.performances.studyDateId, studyDateId!),
+      ),
+    });
+    const score = existing
+      ? (Math.min(existing.score, scoreByLo[loId]) as Score)
+      : scoreByLo[loId];
 
-    for (const loId of testedLoIds) {
-      // Merge with whatever is already in today's cell rather than replacing
-      // it. Two sessions can share a date, and the cell describes the day.
-      const existing = await db.query.performances.findFirst({
-        where: and(
-          eq(schema.performances.loId, loId),
-          eq(schema.performances.studyDateId, studyDateId),
-        ),
+    await db
+      .insert(schema.performances)
+      .values({ loId, studyDateId: studyDateId!, score })
+      .onConflictDoUpdate({
+        target: [schema.performances.loId, schema.performances.studyDateId],
+        set: { score },
       });
-
-      const rating =
-        worstRating(
-          existing ? [existing.rating, ratingByLo[loId]] : [ratingByLo[loId]],
-        ) ?? ratingByLo[loId];
-
-      await db
-        .insert(schema.performances)
-        .values({ loId, studyDateId, rating })
-        .onConflictDoUpdate({
-          target: [schema.performances.loId, schema.performances.studyDateId],
-          set: { rating },
-        });
-    }
   }
 
-  const moves = loaded.kind.itemOutcomes(loaded.attempts, loaded.material);
   const outcomes: Outcome[] = [];
 
-  for (const [itemId, rating] of moves) {
+  for (const [itemId, mark] of marks) {
     const item = await db.query.reviewItems.findFirst({
       where: eq(schema.reviewItems.id, itemId),
     });
     if (!item) continue;
 
+    const existing = await db.query.conceptMarks.findFirst({
+      where: and(
+        eq(schema.conceptMarks.reviewItemId, itemId),
+        eq(schema.conceptMarks.studyDateId, studyDateId!),
+      ),
+    });
+    const dayMark = existing ? worstMark([existing.mark, mark])! : mark;
+
+    await db
+      .insert(schema.conceptMarks)
+      .values({ reviewItemId: itemId, studyDateId: studyDateId!, mark: dayMark })
+      .onConflictDoUpdate({
+        target: [schema.conceptMarks.reviewItemId, schema.conceptMarks.studyDateId],
+        set: { mark: dayMark },
+      });
+
     const next = nextSchedule(
       { intervalDays: item.intervalDays, lapses: item.lapses, streak: item.streak },
-      rating,
+      mark,
       today,
     );
 
@@ -390,16 +475,16 @@ export async function finishSession(
         intervalDays: next.intervalDays,
         lapses: next.lapses,
         streak: next.streak,
-        lastRating: rating,
+        lastRating: mark,
       })
       .where(eq(schema.reviewItems.id, item.id));
 
     outcomes.push({
       reviewItemId: item.id,
       concept: item.concept,
-      rating,
+      mark,
       tierBefore: tierOf(item),
-      tierAfter: tierOf({ ...next, lastRating: rating }),
+      tierAfter: tierOf({ ...next, lastRating: mark }),
       dueOn: next.dueOn,
     });
   }
@@ -424,7 +509,7 @@ export async function finishSession(
   return {
     cellsWritten: testedLoIds.length,
     reviewItemsRescheduled: outcomes.length,
-    ratingByLo,
+    scoreByLo,
     debrief,
     outcomes,
   };

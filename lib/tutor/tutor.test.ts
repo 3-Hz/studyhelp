@@ -286,21 +286,42 @@ test("a hint comes back as a cue", async () => {
   expect(hint).toMatch(/misfolds/);
 });
 
-test("the objective is omitted cleanly for the whole-lecture summary", async () => {
+test("a probe is briefed as first-order and names its target", async () => {
   const { prompts } = capture();
   const model = new MockLanguageModelV4({
     doGenerate: async (options) => {
       prompts.push(JSON.stringify(options.prompt));
-      return textResult('{"format":"summary","question":"Summarise the lecture."}');
+      return textResult('{"format":"short_answer","question":"Which protein?"}');
     },
   });
 
   await askQuestion(
-    { stage: "summary", lectureTitle: "Amyloidosis", concepts: [] },
+    {
+      ...context,
+      stage: "lo_probe",
+      order: "first",
+      concepts: [{ ...context.concepts[0], ordinal: 1 }],
+      targetConcept: context.concepts[0].concept,
+    },
     { profile, model },
   );
 
-  expect(prompts[0]).not.toMatch(/Objective:/);
+  expect(prompts[0]).toMatch(/first-order probe/i);
+  expect(prompts[0]).toMatch(/Target concept: 1\. AL vs ATTR/);
+  expect(prompts[0]).toMatch(/one part of this concept/i);
+});
+
+test("an objective with no concepts says so rather than listing nothing", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult('{"format":"free_recall","question":"Explain."}');
+    },
+  });
+
+  await askQuestion({ ...context, concepts: [] }, { profile, model });
+
   expect(prompts[0]).toMatch(/no concepts were extracted/);
 });
 
@@ -430,7 +451,8 @@ test("the last attempt reaches the prompt, with a steer that depends on order", 
   });
   const lastAttempt = {
     daysAgo: 3,
-    rating: "red" as const,
+    score: 2 as const,
+    mark: "red" as const,
     hintsUsed: false,
     missing: ["Organ tropism"],
     incorrect: ["Said ATTR comes from light chains"],
@@ -443,6 +465,7 @@ test("the last attempt reaches the prompt, with a steer that depends on order", 
     { profile, model },
   );
   expect(prompts[0]).toMatch(/3 days ago/);
+  expect(prompts[0]).toMatch(/scored 2\/5, this concept red/);
   expect(prompts[0]).toMatch(/Organ tropism/);
   expect(prompts[0]).toMatch(/light chains/);
   expect(prompts[0]).toMatch(/transthyretin/);
@@ -453,12 +476,13 @@ test("the last attempt reaches the prompt, with a steer that depends on order", 
       ...context,
       stage: "daily",
       order: "third",
-      lastAttempt: { ...lastAttempt, daysAgo: 1, rating: "green", hintsUsed: true, aboutObjective: true },
+      lastAttempt: { ...lastAttempt, daysAgo: 1, score: 5, mark: null, hintsUsed: true, aboutObjective: true },
     },
     { profile, model },
   );
   expect(prompts[1]).toMatch(/yesterday/);
-  expect(prompts[1]).toMatch(/after a cue/);
+  expect(prompts[1]).toMatch(/scored 5\/5, after a cue/);
+  expect(prompts[1]).not.toMatch(/this concept/);
   expect(prompts[1]).toMatch(/objective as a whole/);
   expect(prompts[1]).toMatch(/different route/i);
   expect(prompts[1]).not.toMatch(/target what was missed/i);

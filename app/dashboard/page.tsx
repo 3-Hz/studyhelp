@@ -1,25 +1,16 @@
 import { asc } from "drizzle-orm";
 import Link from "next/link";
+import {
+  SCORE_LABEL,
+  SCORES_DESC,
+  scoreStyle,
+  SUSPENDED_STYLE,
+} from "@/app/components/scores";
 import { SuspendToggle } from "@/app/components/SuspendToggle";
 import { db, schema } from "@/lib/db";
-import type { Rating } from "@/lib/db/schema";
+import type { Score } from "@/lib/db/schema";
 
 export const dynamic = "force-dynamic";
-
-const CELL_STYLE: Record<Rating, string> = {
-  green: "bg-emerald-500",
-  yellow: "bg-amber-400",
-  red: "bg-red-500",
-  // Dark green = suspended: do not quiz again unless reactivated.
-  suspended: "bg-emerald-900",
-};
-
-const CELL_LABEL: Record<Rating, string> = {
-  green: "Independent, complete recall",
-  yellow: "Partial, or needed hints",
-  red: "Not recalled, or a misconception",
-  suspended: "Suspended",
-};
 
 export default async function DashboardPage() {
   const objectives = await db.query.learningObjectives.findMany({
@@ -38,13 +29,13 @@ export default async function DashboardPage() {
 
   const lectureTitleById = new Map(lectures.map((l) => [l.id, l.title]));
 
-  // "loId:studyDateId" -> rating. A missing key renders as a blank cell,
+  // "loId:studyDateId" -> score. A missing key renders as a blank cell,
   // which is the whole point: untested never looks like tested.
-  const cellByKey = new Map<string, Rating>();
+  const cellByKey = new Map<string, Score>();
   for (const performance of performances) {
     cellByKey.set(
       `${performance.loId}:${performance.studyDateId}`,
-      performance.rating,
+      performance.score,
     );
   }
 
@@ -73,16 +64,18 @@ export default async function DashboardPage() {
       </div>
 
       <div className="mt-6 flex flex-wrap gap-4 text-xs text-stone-600 dark:text-stone-400">
-        {(["green", "yellow", "red"] as Rating[]).map((rating) => (
-          <span key={rating} className="flex items-center gap-1.5">
+        {SCORES_DESC.map((score) => (
+          <span key={score} className="flex items-center gap-1.5">
             <span
-              className={`inline-block h-3 w-3 rounded-sm ${CELL_STYLE[rating]}`}
-            />
-            {CELL_LABEL[rating]}
+              className={`inline-flex h-4 w-4 items-center justify-center rounded-sm text-[10px] font-semibold ${scoreStyle(score)}`}
+            >
+              {score}
+            </span>
+            {SCORE_LABEL[score].slice(4)}
           </span>
         ))}
         <span className="flex items-center gap-1.5">
-          <span className={`inline-block h-3 w-3 rounded-sm ${CELL_STYLE.suspended}`} />
+          <span className={`inline-block h-3 w-3 rounded-sm ${SUSPENDED_STYLE}`} />
           Suspended — marks the objective, not a day
         </span>
       </div>
@@ -139,21 +132,23 @@ export default async function DashboardPage() {
                     {objective.suspended && (
                       <span
                         title="Suspended — not quizzed until reactivated"
-                        className={`mr-2 inline-block h-2.5 w-2.5 rounded-sm ${CELL_STYLE.suspended} align-middle`}
+                        className={`mr-2 inline-block h-2.5 w-2.5 rounded-sm ${SUSPENDED_STYLE} align-middle`}
                       />
                     )}
                     {objective.text}
                   </span>
                 </th>
                 {dates.map((date) => {
-                  const rating = cellByKey.get(`${objective.id}:${date.id}`);
+                  const score = cellByKey.get(`${objective.id}:${date.id}`);
                   return (
                     <td key={date.id} className="px-2 py-3 text-center">
-                      {rating ? (
+                      {score ? (
                         <span
-                          title={CELL_LABEL[rating]}
-                          className={`inline-block h-5 w-5 rounded-sm ${CELL_STYLE[rating]}`}
-                        />
+                          title={SCORE_LABEL[score]}
+                          className={`inline-flex h-6 w-6 items-center justify-center rounded-sm text-xs font-semibold ${scoreStyle(score)}`}
+                        >
+                          {score}
+                        </span>
                       ) : (
                         <span className="sr-only">not tested</span>
                       )}

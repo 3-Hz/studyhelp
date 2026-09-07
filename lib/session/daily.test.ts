@@ -18,7 +18,7 @@ const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
 // in Parameters<> and so `| undefined` in a plain index — NonNullable strips
 // that back off, since every test here passes a real tutor.
 type TutorDeps = NonNullable<Parameters<typeof currentTurn>[1]>;
-type Rating = "green" | "yellow" | "red";
+type Score = 1 | 2 | 3 | 4 | 5;
 
 const KINDS = ["fact", "mechanism", "application"] as const;
 
@@ -76,19 +76,16 @@ async function seedLecture(title: string, objectives: number, block: string) {
   return lecture.id;
 }
 
-/** The score a scripted colour stands for, until these scripts speak in scores. */
-const SCORE_FOR = { green: 5, yellow: 4, red: 2 } as const;
-
-/** A tutor that always picks the first format it is allowed to. */
-function stubTutor(ratings: Rating[]): TutorDeps {
-  const queue = [...ratings];
+/** A tutor that always picks the first format it is allowed to, and grades from a script of scores. */
+function stubTutor(scores: Score[]): TutorDeps {
+  const queue = [...scores];
   return {
     askQuestion: async (context) => ({
       format: context.allowedFormats?.[0] ?? "free_recall",
       question: `Question about ${context.targetConcept ?? context.objective ?? "the lecture"}`,
     }),
     gradeAnswer: async () => ({
-      score: SCORE_FOR[queue.shift() ?? "green"],
+      score: queue.shift() ?? 5,
       conceptMarks: [],
       correct: [],
       missing: [],
@@ -306,7 +303,7 @@ test("finishing reschedules only the items actually asked", async () => {
   expect(result.outcomes).toHaveLength(10);
   expect(new Set(result.outcomes.map((o) => o.reviewItemId))).toEqual(asked);
   for (const outcome of result.outcomes) {
-    expect(outcome.rating).toBe("green");
+    expect(outcome.mark).toBe("green");
     expect(["consolidating", "mature"]).toContain(outcome.tierAfter);
     expect(outcome.concept.length).toBeGreaterThan(0);
   }
@@ -330,26 +327,26 @@ test("finishing writes a debrief onto the session", async () => {
   expect((session!.debrief as { heldUp: string[] }).heldUp).toEqual(["Fibril structure"]);
 });
 
-test("a same-day session and a daily session on one date leave the worst rating", async () => {
+test("a same-day session and a daily session on one date leave the lowest score", async () => {
   const lectureId = await seedLecture("Tubular disease", 1, "Renal");
   const objective = await db.query.learningObjectives.findFirst({
     where: eq(schema.learningObjectives.lectureId, lectureId),
   });
 
-  const sameDayTutor = stubTutor(["red", "green", "green"]);
+  const sameDayTutor = stubTutor([2, 5, 5]);
   const sameDay = await startSameDaySession(lectureId);
   await playThrough(sameDay, sameDayTutor);
   await finishSession(sameDay, { deps: sameDayTutor });
 
-  const dailyTutor = stubTutor(Array(10).fill("green"));
+  const dailyTutor = stubTutor(Array(10).fill(5));
   const daily = await startDailySession();
   await playThrough(daily, dailyTutor);
   const dailyResult = await finishSession(daily, { deps: dailyTutor });
 
-  // Precondition, not luck: the same-day session's red alone already makes
-  // the cell below red, so without pinning this the test would stay green
-  // even if the daily session stopped picking the Tubular objective at all.
-  expect(dailyResult.ratingByLo[objective!.id]).toBeDefined();
+  // Precondition, not luck: the same-day session's 2 alone already makes the
+  // cell below a 2, so without pinning this the test would stay green even
+  // if the daily session stopped picking the Tubular objective at all.
+  expect(dailyResult.scoreByLo[objective!.id]).toBeDefined();
 
   const studyDate = await db.query.studyDates.findFirst({
     where: eq(schema.studyDates.date, todayIso()),
@@ -360,7 +357,7 @@ test("a same-day session and a daily session on one date leave the worst rating"
 
   expect(studyDate).toBeDefined();
   expect(cells).toHaveLength(1);
-  expect(cells[0].rating).toBe("red");
+  expect(cells[0].score).toBe(2);
 });
 
 test("the reflection is handed to the debrief", async () => {
@@ -387,9 +384,9 @@ test("the reflection is handed to the debrief", async () => {
   expect(requests[0].reflection).toBe("Hardest: the precursor.");
 });
 
-test("every daily question carries the item's tier, and a red makes it relearning next time", async () => {
+test("every daily question carries the item's tier, and a 2 makes it relearning next time", async () => {
   const first = await startDailySession();
-  const redTutor = stubTutor(Array(10).fill("red"));
+  const redTutor = stubTutor(Array(10).fill(2));
   await playThrough(first, redTutor);
   await finishSession(first, { deps: redTutor });
 
@@ -426,7 +423,6 @@ test("a plan frozen before tiers existed still explains its turns from the row",
           bucket: "fill",
           loId: objective!.id,
           reviewItemId: item!.id,
-          companionItemIds: [],
           formatFamily: FORMAT_FAMILY[item!.kind],
         },
       ],

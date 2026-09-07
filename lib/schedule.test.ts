@@ -3,7 +3,6 @@ import {
   addDays,
   band,
   capMark,
-  capRating,
   capScore,
   daysBetween,
   LADDER,
@@ -14,13 +13,11 @@ import {
   orderFor,
   tierOf,
   todayIso,
-  worstByLo,
   worstMark,
-  worstRating,
   yellowInterval,
   type Tier,
 } from "./schedule";
-import type { Rating } from "@/lib/db/schema";
+import type { Mark } from "@/lib/db/schema";
 
 const TODAY = "2026-03-01";
 
@@ -84,36 +81,15 @@ test("only red counts a lapse", () => {
   expect(nextSchedule(from, "yellow", TODAY).lapses).toBe(4);
 });
 
-test("suspended leaves the interval and lapses untouched", () => {
-  const result = nextSchedule(
-    { intervalDays: 30, lapses: 2, streak: 0 },
-    "suspended",
-    TODAY,
-  );
-
-  expect(result.intervalDays).toBe(30);
-  expect(result.lapses).toBe(2);
-});
-
 test("dueOn is always today plus the stored interval", () => {
-  for (const rating of ["green", "yellow", "red", "suspended"] as const) {
+  for (const mark of ["green", "yellow", "red"] as const) {
     const result = nextSchedule(
       { intervalDays: 7, lapses: 0, streak: 0 },
-      rating,
+      mark,
       TODAY,
     );
     expect(result.dueOn).toBe(addDays(TODAY, result.intervalDays));
   }
-});
-
-test("hinted recall never scores green", () => {
-  expect(capRating("green", true)).toBe("yellow");
-  expect(capRating("green", false)).toBe("green");
-});
-
-test("hints do not improve a yellow or red", () => {
-  expect(capRating("yellow", true)).toBe("yellow");
-  expect(capRating("red", true)).toBe("red");
 });
 
 test("addDays crosses month and year boundaries", () => {
@@ -139,41 +115,6 @@ test("todayIso reads the local calendar date, not the UTC one", () => {
 
 test("todayIso pads single-digit months and days", () => {
   expect(todayIso(new Date(2026, 0, 5))).toBe("2026-01-05");
-});
-
-test("the worst rating of a session represents the day", () => {
-  expect(worstRating(["green", "red", "green"])).toBe("red");
-  expect(worstRating(["green", "yellow"])).toBe("yellow");
-  expect(worstRating(["green", "green"])).toBe("green");
-});
-
-test("worstRating reports nothing for an untested objective", () => {
-  expect(worstRating([])).toBeUndefined();
-});
-
-test("worstByLo ignores turns with no loId, the lecture-summary stage", () => {
-  const result = worstByLo([
-    { loId: null, rating: "red" },
-    { loId: 1, rating: "green" },
-  ]);
-  expect(result.get(1)).toBe("green");
-  expect(result.size).toBe(1);
-});
-
-test("worstByLo ignores an ungraded turn", () => {
-  const result = worstByLo([
-    { loId: 1, rating: null },
-    { loId: 1, rating: "yellow" },
-  ]);
-  expect(result.get(1)).toBe("yellow");
-});
-
-test("worstByLo takes an objective's worst rating across the sitting", () => {
-  const result = worstByLo([
-    { loId: 1, rating: "red" },
-    { loId: 1, rating: "green" },
-  ]);
-  expect(result.get(1)).toBe("red");
 });
 
 test("daysBetween counts whole calendar days in either direction", () => {
@@ -215,15 +156,6 @@ test("green extends the streak; yellow and red reset it", () => {
   expect(nextSchedule(from, "red", TODAY).streak).toBe(0);
 });
 
-test("suspended leaves the streak alone", () => {
-  const result = nextSchedule(
-    { intervalDays: 30, lapses: 2, streak: 5 },
-    "suspended",
-    TODAY,
-  );
-  expect(result.streak).toBe(5);
-});
-
 test("tierOf reads the four-field state", () => {
   const cases: [Parameters<typeof tierOf>[0], Tier][] = [
     [{ lastRating: null, lapses: 0, streak: 0, intervalDays: 0 }, "new"],
@@ -236,21 +168,19 @@ test("tierOf reads the four-field state", () => {
     [{ lastRating: "green", lapses: 1, streak: 2, intervalDays: 14 }, "consolidating"],
     [{ lastRating: "green", lapses: 0, streak: 3, intervalDays: 14 }, "mature"],
     [{ lastRating: "green", lapses: 3, streak: 6, intervalDays: 14 }, "mature"],
-    // The grade schema forbids "suspended", but the column type allows it.
-    [{ lastRating: "suspended", lapses: 0, streak: 4, intervalDays: 30 }, "mature"],
   ];
   for (const [state, tier] of cases) {
     expect(tierOf(state)).toBe(tier);
   }
 });
 
-/** Runs a rating sequence from new, returning the interval and tier after each. */
-function replay(ratings: Rating[]): { interval: number; tier: Tier }[] {
-  let state = { intervalDays: 0, lapses: 0, streak: 0, lastRating: null as Rating | null };
+/** Runs a mark sequence from new, returning the interval and tier after each. */
+function replay(marks: Mark[]): { interval: number; tier: Tier }[] {
+  let state = { intervalDays: 0, lapses: 0, streak: 0, lastRating: null as Mark | null };
   const trail: { interval: number; tier: Tier }[] = [];
-  for (const rating of ratings) {
-    const next = nextSchedule(state, rating, TODAY);
-    state = { ...next, lastRating: rating };
+  for (const mark of marks) {
+    const next = nextSchedule(state, mark, TODAY);
+    state = { ...next, lastRating: mark };
     trail.push({ interval: next.intervalDays, tier: tierOf(state) });
   }
   return trail;

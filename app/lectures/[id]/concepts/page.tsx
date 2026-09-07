@@ -1,16 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { Rating } from "@/lib/db/schema";
+import { MARK_STYLE, SUSPENDED_STYLE } from "@/app/components/scores";
 import { lectureConcepts, type ConceptRow } from "@/lib/concepts";
 
 export const dynamic = "force-dynamic";
 
-const SWATCH: Record<Rating, string> = {
-  green: "bg-emerald-500",
-  yellow: "bg-amber-400",
-  red: "bg-red-500",
-  suspended: "bg-emerald-900",
-};
+const SWATCH = { ...MARK_STYLE, suspended: SUSPENDED_STYLE };
 
 function dueLabel(dueIn: number): string {
   if (dueIn < 0) return `overdue ${-dueIn}d`;
