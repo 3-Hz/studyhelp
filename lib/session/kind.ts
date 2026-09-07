@@ -75,7 +75,7 @@ export interface TurnWhy {
 
 /**
  * What differs between the two session flavours. The runner owns everything
- * else: resuming a pending question, capping a hinted rating, writing the day.
+ * else: resuming a pending question, capping a hinted score, writing the day.
  *
  * `M` is the flavour's material — one lecture for the same-day review, a set
  * of items across lectures for daily practice.

@@ -280,7 +280,8 @@ export interface HintRequest extends TurnContext {
 
 /**
  * A cue, not an answer (prompt.txt Retrieval Rules 2–3). Asking for one is
- * recorded on the attempt and caps the rating at yellow — see capRating.
+ * recorded on the attempt and caps the score at 4 and a green mark at yellow
+ * — see capScore and capMark.
  */
 export async function giveHint(
   request: HintRequest,

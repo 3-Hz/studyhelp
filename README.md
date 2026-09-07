@@ -4,11 +4,16 @@ A local study coach for medical school, built around *Make It Stick* principles:
 same-day lecture review, daily retrieval practice, and a longitudinal Learning
 Objective dashboard.
 
-`prompt.txt` is the original system prompt this is built from. The app splits its
+Two prompts govern it. `new_prompt.txt` is the current ChatGPT workflow this
+app replaces: the LO Map, 1–5 scores, a time budget, first- to third-order
+questions, one objective at a time. `prompt.txt` is the original, kept because
+the app retains what it added and the new prompt dropped: the interval ladder,
+cues and their cap, suspension, provenance, the reflection and the debrief.
+Where the two disagree, the new prompt wins. The app splits its
 responsibilities deliberately:
 
-- **Code owns the bookkeeping** — the dashboard, the color history, the
-  spaced-repetition scheduler, and which items are due. Deterministic and
+- **Code owns the bookkeeping** — the dashboard, the score and mark history,
+  the spaced-repetition scheduler, and which items are due. Deterministic and
   inspectable.
 - **Claude owns the pedagogy** — reading lectures, extracting objectives,
   generating varied questions, grading recall, and giving corrective feedback.
@@ -170,42 +175,55 @@ objective wording is preserved verbatim and worth checking.
 
 **Phase 2 (same-day retrieval practice) is implemented.**
 
-Studying a committed lecture walks its objectives one at a time: recall each
-objective from memory, summarise the whole lecture, then elaborate on whatever
-did not come back cleanly. Each answer is graded green, yellow, or red with the
-correction and a model answer.
+Studying a committed lecture walks its objectives one at a time, first-order
+only: recall each objective from memory, then answer a probe on each concept
+the recall left untested or short. Each answer is scored 1–5 against the
+rubric, with a mark for every concept it tested, the correction and a model
+answer.
 
 The pacing and the bookkeeping are code, not prompt. Asking for a cue caps the
-answer at yellow — hinted recall is not independent recall, so the model is not
-allowed to grade its way past it. A day's dashboard cell is the *worst* rating
-the objective earned that sitting, since a green that follows a red is recall of
-the correction just given. Objectives never tested stay blank, and finishing
-schedules every concept beneath them on the 0 / 1 / 3 / 7 / 14 / 30 / 60 day
-ladder.
+answer at 4 — correct with help is not independent recall, so the model is not
+allowed to grade its way past it. A day's dashboard cell is the *lowest* score
+the objective earned that sitting, since a 5 that follows a 2 is recall of the
+correction just given. Objectives never tested stay blank, and finishing moves
+each marked concept on the 0 / 1 / 3 / 7 / 14 / 30 / 60 day ladder and leaves
+the unmarked ones alone.
 
-**Phase 3 (daily 10-question sessions interleaved across lectures) is implemented.**
+**Phase 3 (daily sessions interleaved across lectures) is implemented.**
 
-Each day's ten questions come from every committed lecture's review items:
-four due for spaced review, two from recent material, two weak or previously
-missed, two interleaved or cumulative. Selection is a pure function over the
-candidate pool, so a plan is reproducible and explainable afterward. An
-objective can be suspended from the dashboard (dark green: "do not quiz again
-unless I reactivate it"). Suspension is a row state, not a dashboard cell — it
-drops the objective's concepts from the daily pool and from a same-day
-session's plan without claiming the objective was tested that day.
+Each day's session covers objectives from every committed lecture — due for
+spaced review first, then weak, then recent, then one from another lecture —
+with one to three questions on each, alternating lectures between objectives
+and never combining them. Selection is a pure function over the candidate
+pool, so a plan is reproducible and explainable afterward. An objective can
+be suspended from the dashboard (dark green: "do not quiz again unless I
+reactivate it"). Suspension is a row state, not a dashboard cell — it drops
+the objective's concepts from the daily pool and from a same-day session's
+plan without claiming the objective was tested that day.
 
 **Phase 4 (history-aware scheduling and adaptive difficulty) is implemented.**
 
-The scheduler reads an item's history, not only its latest colour. An item
+The scheduler reads an item's history, not only its latest mark. An item
 that has ever lapsed climbs a ladder with twice the rungs; yellow halves the
 interval within a 1–3 day band; and every item carries a mastery tier — new,
 relearning, consolidating, mature — that takes three greens in a row and a
-fortnight's interval to reach. The tier steers how demanding the next
-question is, and each question also carries what was missed last time. Every
-session closes with an ungraded reflection turn — the student's own account,
-which the debrief compares with the graded record. Why a question was shaped
-as it was is shown after grading, never before; a read-only concept view
-under each lecture shows where every item stands.
+fortnight's interval to reach. Each question also carries what was missed
+last time. Every session closes with an ungraded reflection turn — the
+student's own account, which the debrief compares with the graded record.
+Why a question was shaped as it was is shown after grading, never before.
+
+**Phase 5 (the new ChatGPT prompt) is implemented.**
+
+Scores are 1–5 (5 correct without help, 4 with help or mostly, 3 a big
+mistake, 2 wrong, 1 no idea) and each concept the answer tested gets a
+green, yellow or red mark. Every session starts with the minutes available,
+which set how many objectives it covers and how many questions each gets.
+Daily questions are first-, second- or third-order by the objective's latest
+score. Concepts are numbered under their objective in the lecture's order,
+and the concept view under each lecture is the LO Map: the numbered concepts,
+their count, and the mark each earned on each date. Extraction records the
+questions a lecture itself poses, with the answers its notes give, and a
+session prefers one when it fits.
 
 ## Data
 
@@ -221,16 +239,18 @@ app/
   api/lectures/             ingest + commit endpoints
   api/objectives/           suspend/reactivate an objective
   api/sessions/             start, turn, answer, hint, finish
-  dashboard/                the LO grid
+  components/scores.ts      the rubric and the mark colours, shared by every screen
+  components/MinutesSelect  the time budget a session starts with
+  dashboard/                the LO grid: one 1–5 score per objective per day
   import/                   upload
   lectures/                 the lecture list
   lectures/[id]/review/     draft review before commit
-  lectures/[id]/concepts/   every review item under a lecture, and where it stands
+  lectures/[id]/concepts/   the LO Map: numbered concepts, their state, their marks by date
   practice/                 the daily-practice landing screen
   sessions/[id]/            the study session
 lib/
   db/schema.ts              Drizzle schema
-  schedule.ts               the ladders, the yellow band, the hint cap, worst-of-day, the tier
+  schedule.ts               the ladders, the yellow band, band(), the caps, the order, the tier
   eval/score.ts             scoring an extraction against the answer key
   fixtures/pptxBuilder.ts   minimal OOXML deck builder
   fixtures/syntheticLecture.ts  fabricated lecture + ground truth
@@ -247,16 +267,17 @@ lib/
   extract/index.ts          single vs chunked orchestration
   extract/chunk.ts          splitting a lecture to fit the context window
   extract/merge.ts          deterministic merge of chunked extractions
-  commitLecture.ts          draft → dashboard rows + review items
-  concepts.ts               a lecture's objectives and review items, with tier and due state
+  commitLecture.ts          draft → dashboard rows, numbered review items, practice questions
+  concepts.ts               the LO Map's data: objectives, numbered items, marks by date
   tutor/schema.ts           question, grade and hint contracts
   tutor/index.ts            asking, grading and cueing
+  session/budget.ts         minutes → objectives and questions per objective
   session/kind.ts           the shared session-kind interface
   session/plan.ts           the same-day session's running order, as a pure function
-  session/sameDay.ts        the same-day session; writes the day and reschedules
-  session/candidates.ts     everything the daily session could ask about
-  session/select.ts         choosing the day's ten questions, as a pure function
+  session/sameDay.ts        the same-day session: recall, then probes
+  session/candidates.ts     every objective the daily session could cover, with its items
+  session/select.ts         choosing the day's objectives and questions, as a pure function
   session/daily.ts          the daily session; interleaved across every lecture
   session/prior.ts          the last graded attempt on each planned item
-  session/runner.ts         asking, grading, and advancing either session kind
+  session/runner.ts         asking, grading, marking, and advancing either session kind
 ```

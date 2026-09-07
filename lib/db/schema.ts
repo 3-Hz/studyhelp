@@ -256,7 +256,7 @@ export const sessions = sqliteTable("sessions", {
   /** The close-out summary, written when the session is finished. */
   debrief: text("debrief", { mode: "json" }),
   /**
-   * What finishing did to each review item: rating, tier before and after,
+   * What finishing did to each review item: mark, tier before and after,
    * new due date. The code-owned half of the close-out, beside the
    * model-owned debrief.
    */
