@@ -193,6 +193,11 @@ export const performances = sqliteTable(
       .notNull()
       .references(() => studyDates.id, { onDelete: "cascade" }),
     rating: text("rating", { enum: RATINGS }).notNull(),
+    /**
+     * The objective's 1–5 score for the day (new_prompt.txt "Scoring").
+     * Nullable only until the runner writes it and `rating` is dropped.
+     */
+    score: integer("score").$type<Score>(),
     note: text("note"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
@@ -214,6 +219,12 @@ export const reviewItems = sqliteTable(
       .notNull()
       .references(() => learningObjectives.id, { onDelete: "cascade" }),
     concept: text("concept").notNull(),
+    /**
+     * The concept's number within its objective, 1-based, in the order the
+     * lecture presented it: column F of the new prompt's LO Map, and the
+     * number a grader marks.
+     */
+    ordinal: integer("ordinal").notNull().default(0),
     kind: text("kind", { enum: REVIEW_KINDS }).notNull(),
     provenance: text("provenance", { enum: PROVENANCE })
       .notNull()
@@ -256,6 +267,11 @@ export const sessions = sqliteTable("sessions", {
    * model-owned debrief.
    */
   outcomes: text("outcomes", { mode: "json" }),
+  /**
+   * The time budget given at start, which sized the plan. Null on sessions
+   * from before budgets existed.
+   */
+  minutes: integer("minutes"),
   startedAt: integer("started_at", { mode: "timestamp" })
     .notNull()
     .default(now),
@@ -302,6 +318,14 @@ export const attempts = sqliteTable(
     question: text("question").notNull(),
     studentAnswer: text("student_answer"),
     rating: text("rating", { enum: RATINGS }),
+    /** The question's 1–5 score, after capScore. Null until graded. */
+    score: integer("score").$type<Score>(),
+    /**
+     * The marks the grader gave the concepts this answer tested, after
+     * capMark: `{ reviewItemId, mark }[]`. Concepts it did not test are
+     * absent, and so do not move.
+     */
+    conceptMarks: text("concept_marks", { mode: "json" }).$type<ConceptMark[]>(),
     feedback: text("feedback"),
     /** Hinted recall never counts as independent mastery — caps rating at yellow. */
     hintsUsed: integer("hints_used", { mode: "boolean" })
@@ -312,4 +336,63 @@ export const attempts = sqliteTable(
       .default(now),
   },
   (t) => [index("attempts_session_idx").on(t.sessionId)],
+);
+
+/** One concept's mark from one graded answer. */
+export interface ConceptMark {
+  reviewItemId: number;
+  mark: Mark;
+}
+
+/**
+ * A concept's mark for a day: the new prompt's coloured concept numbers,
+ * "columns Y onward". Rows exist only where a concept was tested, so an
+ * untested concept is left unchanged by construction.
+ */
+export const conceptMarks = sqliteTable(
+  "concept_marks",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    reviewItemId: integer("review_item_id")
+      .notNull()
+      .references(() => reviewItems.id, { onDelete: "cascade" }),
+    studyDateId: integer("study_date_id")
+      .notNull()
+      .references(() => studyDates.id, { onDelete: "cascade" }),
+    mark: text("mark", { enum: MARKS }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [
+    unique("concept_marks_item_date_unq").on(t.reviewItemId, t.studyDateId),
+    index("concept_marks_item_idx").on(t.reviewItemId),
+  ],
+);
+
+/**
+ * A question the lecture itself poses, with its answer from the notes or the
+ * following slide (new_prompt.txt: "use practice questions from the slides
+ * and their note-based answers when available"). Kept whole rather than
+ * turned into review items: the tutor prefers one when it fits the target.
+ */
+export const practiceQuestions = sqliteTable(
+  "practice_questions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    lectureId: integer("lecture_id")
+      .notNull()
+      .references(() => lectures.id, { onDelete: "cascade" }),
+    /** The objective it serves, when the extract could tell. */
+    loId: integer("lo_id").references(() => learningObjectives.id, {
+      onDelete: "set null",
+    }),
+    question: text("question").notNull(),
+    answer: text("answer").notNull(),
+    slideRefs: text("slide_refs", { mode: "json" }).$type<number[]>(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [index("practice_questions_lecture_idx").on(t.lectureId)],
 );

@@ -83,3 +83,138 @@ test("0005 adds sessions.outcomes", () => {
     .get() as { outcomes: string };
   expect(row.outcomes).toBe("[]");
 });
+
+// --- 0006: scores, marks, concept numbers, budgets, practice questions ---
+
+const SCORES = files.find((file) => file.startsWith("0006_"));
+const BEFORE_SCORES = files.filter((file) => file < "0006_");
+
+function freshBeforeScores(): Database {
+  const sqlite = new Database(":memory:");
+  for (const file of BEFORE_SCORES) apply(sqlite, file);
+  sqlite.exec("INSERT INTO lectures (title) VALUES ('Amyloidosis')");
+  sqlite.exec(
+    "INSERT INTO learning_objectives (lecture_id, text, order_index) VALUES " +
+      "(1, 'Describe fibrils.', 0), (1, 'Name the stains.', 1)",
+  );
+  sqlite.exec(
+    "INSERT INTO study_dates (date) VALUES ('2026-09-01'), ('2026-09-02'), ('2026-09-03')",
+  );
+  return sqlite;
+}
+
+function count(sqlite: Database, table: string): number {
+  return (sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+}
+
+test("0006 numbers each objective's review items in id order", () => {
+  expect(SCORES).toBeDefined();
+  const sqlite = freshBeforeScores();
+
+  // Interleaved, so per-objective numbering and global id order differ.
+  for (const loId of [1, 2, 1, 2, 1]) {
+    sqlite
+      .prepare(
+        "INSERT INTO review_items (lo_id, concept, kind, due_on) VALUES (?, ?, 'fact', '2026-09-04')",
+      )
+      .run(loId, `under ${loId}`);
+  }
+
+  apply(sqlite, SCORES!);
+
+  const rows = sqlite
+    .prepare("SELECT lo_id, ordinal FROM review_items ORDER BY id")
+    .all() as { lo_id: number; ordinal: number }[];
+  expect(rows).toEqual([
+    { lo_id: 1, ordinal: 1 },
+    { lo_id: 2, ordinal: 1 },
+    { lo_id: 1, ordinal: 2 },
+    { lo_id: 2, ordinal: 2 },
+    { lo_id: 1, ordinal: 3 },
+  ]);
+});
+
+test("0006 backfills a 1–5 score from each dashboard cell's colour", () => {
+  const sqlite = freshBeforeScores();
+  sqlite.exec(
+    "INSERT INTO performances (lo_id, study_date_id, rating) VALUES " +
+      "(1, 1, 'green'), (1, 2, 'yellow'), (1, 3, 'red')",
+  );
+
+  apply(sqlite, SCORES!);
+
+  const rows = sqlite
+    .prepare("SELECT score FROM performances ORDER BY study_date_id")
+    .all() as { score: number }[];
+  expect(rows.map((row) => row.score)).toEqual([5, 4, 2]);
+});
+
+test("0006 backfills attempt scores and leaves ungraded attempts alone", () => {
+  const sqlite = freshBeforeScores();
+  sqlite.exec("INSERT INTO sessions (type) VALUES ('daily')");
+  for (const rating of ["green", "yellow", "red", null]) {
+    sqlite
+      .prepare(
+        "INSERT INTO attempts (session_id, stage, format, question, rating) " +
+          "VALUES (1, 'daily', 'free_recall', 'q', ?)",
+      )
+      .run(rating);
+  }
+
+  apply(sqlite, SCORES!);
+
+  const rows = sqlite
+    .prepare("SELECT score FROM attempts ORDER BY id")
+    .all() as { score: number | null }[];
+  expect(rows.map((row) => row.score)).toEqual([5, 4, 2, null]);
+});
+
+test("0006 adds sessions.minutes and attempts.concept_marks", () => {
+  const sqlite = freshBeforeScores();
+  apply(sqlite, SCORES!);
+
+  sqlite.exec("INSERT INTO sessions (type, minutes) VALUES ('daily', 20)");
+  sqlite.exec(
+    "INSERT INTO attempts (session_id, stage, format, question, concept_marks) " +
+      `VALUES (1, 'daily', 'free_recall', 'q', '[{"reviewItemId":1,"mark":"green"}]')`,
+  );
+
+  const session = sqlite.prepare("SELECT minutes FROM sessions").get() as { minutes: number };
+  expect(session.minutes).toBe(20);
+  const attempt = sqlite
+    .prepare("SELECT concept_marks FROM attempts")
+    .get() as { concept_marks: string };
+  expect(JSON.parse(attempt.concept_marks)).toEqual([{ reviewItemId: 1, mark: "green" }]);
+});
+
+test("0006 creates concept_marks: one mark per item per day", () => {
+  const sqlite = freshBeforeScores();
+  sqlite.exec(
+    "INSERT INTO review_items (lo_id, concept, kind, due_on) VALUES (1, 'c', 'fact', '2026-09-04')",
+  );
+  apply(sqlite, SCORES!);
+
+  sqlite.exec("INSERT INTO concept_marks (review_item_id, study_date_id, mark) VALUES (1, 1, 'green')");
+  expect(() =>
+    sqlite.exec("INSERT INTO concept_marks (review_item_id, study_date_id, mark) VALUES (1, 1, 'red')"),
+  ).toThrow();
+  sqlite.exec("INSERT INTO concept_marks (review_item_id, study_date_id, mark) VALUES (1, 2, 'red')");
+
+  expect(count(sqlite, "concept_marks")).toBe(2);
+});
+
+test("0006 creates practice_questions under a lecture, optionally under an objective", () => {
+  const sqlite = freshBeforeScores();
+  apply(sqlite, SCORES!);
+
+  sqlite.exec(
+    "INSERT INTO practice_questions (lecture_id, lo_id, question, answer, slide_refs) " +
+      "VALUES (1, 1, 'Which stain?', 'Congo red', '[12]')",
+  );
+  sqlite.exec(
+    "INSERT INTO practice_questions (lecture_id, lo_id, question, answer, slide_refs) " +
+      "VALUES (1, NULL, 'What is amyloid?', 'A misfolded protein.', '[]')",
+  );
+
+  expect(count(sqlite, "practice_questions")).toBe(2);
+});
