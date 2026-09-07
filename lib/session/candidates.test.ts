@@ -42,7 +42,7 @@ test("an uncommitted lecture contributes no candidates", async () => {
   expect(await dailyCandidates()).toEqual([]);
 });
 
-test("a committed lecture contributes one candidate per review item, carrying its objective's colours", async () => {
+test("a committed lecture contributes one candidate per objective, carrying its scores and its items", async () => {
   // Push the objective ids past the review-item ids. Both are first-row
   // autoincrements otherwise, so loId and reviewItemId would coincide and a
   // swap between them would pass unnoticed.
@@ -124,18 +124,24 @@ test("a committed lecture contributes one candidate per review item, carrying it
   ).toBe(6);
 
   expect(candidates[0]).toEqual({
-    reviewItemId: item!.id,
     loId: objective!.id,
     lectureId: lecture.id,
     block: "Renal",
-    kind: "fact",
-    dueOn: "2026-09-10",
-    intervalDays: 7,
-    lapses: 2,
-    streak: 5,
-    lastRating: "yellow",
-    loSuspended: false,
+    suspended: false,
     lectureCommittedOn: "2026-08-20",
-    history: ["red", "green"],
+    // Oldest first: red on the 1st, green on the 2nd.
+    scores: [2, 5],
+    items: [
+      {
+        reviewItemId: item!.id,
+        ordinal: 1,
+        kind: "fact",
+        dueOn: "2026-09-10",
+        intervalDays: 7,
+        lapses: 2,
+        streak: 5,
+        lastRating: "yellow",
+      },
+    ],
   });
 });

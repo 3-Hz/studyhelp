@@ -3,8 +3,9 @@ import Link from "next/link";
 import { StartDailyButton } from "@/app/components/StartDailyButton";
 import { db, schema } from "@/lib/db";
 import { startOfToday, todayIso } from "@/lib/schedule";
+import { dailyBudget, DEFAULT_MINUTES } from "@/lib/session/budget";
 import { dailyCandidates } from "@/lib/session/candidates";
-import { isDue, isEligible, SESSION_SIZE } from "@/lib/session/select";
+import { isEligible, isItemDue } from "@/lib/session/select";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +14,11 @@ export default async function PracticePage() {
   const candidates = await dailyCandidates();
   const eligible = candidates.filter(isEligible);
 
-  const due = eligible.filter((candidate) => isDue(candidate, today));
+  const items = eligible.flatMap((candidate) => candidate.items);
+  const due = items.filter((item) => isItemDue(item, today));
   const objectives = new Set(eligible.map((candidate) => candidate.loId));
   const lectures = new Set(eligible.map((candidate) => candidate.lectureId));
+  const defaultQuestions = dailyBudget(DEFAULT_MINUTES).questions;
 
   // Bounded to today, so this matches exactly what startDailySession will
   // rejoin — otherwise the button could offer "Resume today's session" for a
@@ -64,12 +67,11 @@ export default async function PracticePage() {
             {lectures.size} lecture{lectures.size === 1 ? "" : "s"}.
           </p>
 
-          {eligible.length < SESSION_SIZE && (
+          {items.length < defaultQuestions && (
             <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-              Only {eligible.length} concept{eligible.length === 1 ? "" : "s"}{" "}
-              {eligible.length === 1 ? "exists" : "exist"} so far, so
-              today&rsquo;s session will be that long rather than ten
-              questions.
+              Only {items.length} concept{items.length === 1 ? "" : "s"}{" "}
+              {items.length === 1 ? "exists" : "exist"} so far, so
+              today&rsquo;s session may run shorter than its time budget.
             </p>
           )}
 

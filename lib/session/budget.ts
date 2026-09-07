@@ -8,6 +8,9 @@
 /** A retrieval question, its answer, and reading the feedback. */
 export const MINUTES_PER_QUESTION = 2;
 
+/** What a session gets when no time is given: the ten questions of old. */
+export const DEFAULT_MINUTES = 20;
+
 /** Questions per objective, by session length: depth follows time. */
 const DEPTH_BANDS: { belowMinutes: number; perLo: number }[] = [
   { belowMinutes: 15, perLo: 1 },

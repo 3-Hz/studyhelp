@@ -1,17 +1,18 @@
 import { db, schema } from "@/lib/db";
-import type { Rating } from "@/lib/db/schema";
+import type { Mark, Score } from "@/lib/db/schema";
 import { todayIso } from "@/lib/schedule";
-import type { Candidate } from "./select";
+import type { ItemCandidate, LoCandidate } from "./select";
 
 /**
- * Everything the daily session could ask about, flattened for selection.
+ * Everything the daily session could ask about: one candidate per objective
+ * on a committed lecture, carrying its dashboard scores and its concepts.
  *
  * Read as whole tables and assembled here rather than joined in SQL: this is
  * one student's local file, a few hundred rows at most, and the shape the
- * selector wants — an objective's colours as an ordered array — is clearer in
- * TypeScript than in a query.
+ * selector wants — an objective's scores as an ordered array, its items
+ * beneath it — is clearer in TypeScript than in a query.
  */
-export async function dailyCandidates(): Promise<Candidate[]> {
+export async function dailyCandidates(): Promise<LoCandidate[]> {
   const lectures = await db.query.lectures.findMany();
   const committed = new Map(
     lectures.filter((lecture) => lecture.committedAt).map((l) => [l.id, l]),
@@ -25,46 +26,58 @@ export async function dailyCandidates(): Promise<Candidate[]> {
 
   const dateById = new Map(studyDates.map((date) => [date.id, date.date]));
 
-  const historyByLo = new Map<number, Rating[]>();
+  const scoresByLo = new Map<number, Score[]>();
   const chronological = [...performances].sort((a, b) =>
     (dateById.get(a.studyDateId) ?? "").localeCompare(
       dateById.get(b.studyDateId) ?? "",
     ),
   );
   for (const performance of chronological) {
-    const colours = historyByLo.get(performance.loId) ?? [];
-    colours.push(performance.rating);
-    historyByLo.set(performance.loId, colours);
+    const scores = scoresByLo.get(performance.loId) ?? [];
+    scores.push(scoreOf(performance));
+    scoresByLo.set(performance.loId, scores);
   }
 
-  const objectiveById = new Map(objectives.map((o) => [o.id, o]));
-  const candidates: Candidate[] = [];
+  const itemsByLo = new Map<number, ItemCandidate[]>();
+  for (const item of [...items].sort((a, b) => a.ordinal - b.ordinal || a.id - b.id)) {
+    const list = itemsByLo.get(item.loId) ?? [];
+    list.push({
+      reviewItemId: item.id,
+      ordinal: item.ordinal,
+      kind: item.kind,
+      dueOn: item.dueOn,
+      intervalDays: item.intervalDays,
+      lapses: item.lapses,
+      streak: item.streak,
+      lastRating: item.lastRating as Mark | null,
+    });
+    itemsByLo.set(item.loId, list);
+  }
 
-  for (const item of items) {
-    const objective = objectiveById.get(item.loId);
-    if (!objective) continue;
+  const candidates: LoCandidate[] = [];
 
+  for (const objective of objectives) {
     const lecture = committed.get(objective.lectureId);
     // Objectives only reach the dashboard on commit, so an uncommitted
     // lecture has nothing to practise.
     if (!lecture?.committedAt) continue;
 
     candidates.push({
-      reviewItemId: item.id,
       loId: objective.id,
       lectureId: lecture.id,
       block: lecture.block,
-      kind: item.kind,
-      dueOn: item.dueOn,
-      intervalDays: item.intervalDays,
-      lapses: item.lapses,
-      streak: item.streak,
-      lastRating: item.lastRating,
-      loSuspended: objective.suspended,
+      suspended: objective.suspended,
       lectureCommittedOn: todayIso(lecture.committedAt),
-      history: historyByLo.get(objective.id) ?? [],
+      scores: scoresByLo.get(objective.id) ?? [],
+      items: itemsByLo.get(objective.id) ?? [],
     });
   }
 
   return candidates;
+}
+
+/** The cell's score, or its colour's equivalent for a cell written before scores. */
+function scoreOf(performance: { score: Score | null; rating: string }): Score {
+  if (performance.score !== null) return performance.score;
+  return performance.rating === "green" ? 5 : performance.rating === "yellow" ? 4 : 2;
 }

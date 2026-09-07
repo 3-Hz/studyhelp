@@ -173,6 +173,7 @@ export async function currentTurn(
     allowedFormats: planned.allowedFormats,
     bucket: planned.bucket,
     tier: planned.tier,
+    order: planned.order,
   });
 
   const [created] = await db

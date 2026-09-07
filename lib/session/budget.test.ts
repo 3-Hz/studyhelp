@@ -1,8 +1,12 @@
 import { expect, test } from "bun:test";
-import { budgetFor, dailyBudget, sameDayBudget, spacedSubset } from "./budget";
+import { budgetFor, dailyBudget, DEFAULT_MINUTES, sameDayBudget, spacedSubset } from "./budget";
 
 test("twenty minutes is ten questions, two per objective", () => {
   expect(budgetFor(20)).toEqual({ questions: 10, perLo: 2 });
+});
+
+test("the default budget is the ten questions of old", () => {
+  expect(dailyBudget(DEFAULT_MINUTES).questions).toBe(10);
 });
 
 test("depth follows the time: one question per objective under 15 minutes, three from 30", () => {

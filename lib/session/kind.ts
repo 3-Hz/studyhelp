@@ -1,6 +1,6 @@
 import type * as schema from "@/lib/db/schema";
 import type { Rating, SessionStage } from "@/lib/db/schema";
-import type { Tier } from "@/lib/schedule";
+import type { QuestionOrder, Tier } from "@/lib/schedule";
 import type { QuestionFormat, TurnContext } from "@/lib/tutor";
 import type {
   askQuestion,
@@ -35,6 +35,8 @@ export interface PlannedTurn extends TurnRef {
   bucket?: Bucket;
   /** The item's mastery tier, from the plan. Absent for same-day turns. */
   tier?: Tier;
+  /** How demanding the question should be, from the plan. */
+  order?: QuestionOrder;
 }
 
 /** What finishing did to one review item. Stored on sessions.outcomes. */
@@ -56,6 +58,8 @@ export interface Outcome {
 export interface TurnWhy {
   bucket: Bucket;
   tier: Tier;
+  /** Absent on a plan frozen before orders existed. */
+  order?: QuestionOrder;
   lapses: number;
   streak: number;
   intervalDays: number;

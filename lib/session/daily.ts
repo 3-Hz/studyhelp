@@ -3,17 +3,19 @@ import { db, schema } from "@/lib/db";
 import type { Rating } from "@/lib/db/schema";
 import { startOfToday, tierOf, todayIso } from "@/lib/schedule";
 import type { ConceptContext, PriorAttempt, QuestionFormat } from "@/lib/tutor";
-import type { SessionKind } from "./kind";
+import { dailyBudget, DEFAULT_MINUTES } from "./budget";
 import { dailyCandidates } from "./candidates";
+import type { SessionKind } from "./kind";
 import { priorAttempts } from "./prior";
 import { allowedFormats, select, type PlannedSlot } from "./select";
 
 /**
- * Daily interleaved practice: ten questions across every committed lecture,
- * chosen by select() and frozen on the session row.
+ * Daily interleaved practice: a budget's worth of objectives across every
+ * committed lecture, one to three questions on each, chosen by select() and
+ * frozen on the session row.
  *
- * Unlike the same-day review, this tests concepts rather than objectives — one
- * review item per question — so only the item asked moves on the ladder.
+ * Unlike the same-day review, this tests concepts rather than objectives —
+ * one review item per question — so only the item asked moves on the ladder.
  */
 
 type ReviewItemRow = typeof schema.reviewItems.$inferSelect;
@@ -28,7 +30,10 @@ export interface DailyMaterial {
   priorByItem: Map<number, PriorAttempt>;
 }
 
-export async function startDailySession(now: Date = new Date()): Promise<number> {
+export async function startDailySession(
+  now: Date = new Date(),
+  minutes: number = DEFAULT_MINUTES,
+): Promise<number> {
   // Rejoin an unfinished session rather than starting a parallel one, so a
   // closed tab does not split a sitting in two — but only one started today.
   // A plan is a plan for the day it was chosen: yesterday's due dates are not
@@ -38,7 +43,8 @@ export async function startDailySession(now: Date = new Date()): Promise<number>
   // is deleted while it's open) stops blocking every day after the one it
   // wedged on. It is not stamped with endedAt either: that would mark a
   // session finished that never was, and then miscount as "already finished
-  // today" on /practice.
+  // today" on /practice. A new budget is ignored on rejoin: the plan was
+  // frozen with the old one.
   const open = await db.query.sessions.findFirst({
     where: and(
       eq(schema.sessions.type, "daily"),
@@ -48,7 +54,7 @@ export async function startDailySession(now: Date = new Date()): Promise<number>
   });
   if (open) return open.id;
 
-  const plan = select(await dailyCandidates(), { today: todayIso(now) });
+  const plan = select(await dailyCandidates(), { today: todayIso(now), ...dailyBudget(minutes) });
   if (plan.length === 0) {
     throw new Error(
       "Nothing to practise yet. Commit a lecture's objectives, or reactivate a suspended one.",
@@ -57,7 +63,7 @@ export async function startDailySession(now: Date = new Date()): Promise<number>
 
   const [created] = await db
     .insert(schema.sessions)
-    .values({ type: "daily", plan })
+    .values({ type: "daily", plan, minutes })
     .returning({ id: schema.sessions.id });
 
   return created.id;
@@ -74,14 +80,11 @@ export const dailyKind: SessionKind<DailyMaterial> = {
     }
     const plan = session.plan as PlannedSlot[];
 
-    const wanted = new Set<number>();
-    for (const slot of plan) {
-      wanted.add(slot.reviewItemId);
-      for (const companion of slot.companionItemIds) wanted.add(companion);
-    }
-
     const planned = await db.query.reviewItems.findMany({
-      where: inArray(schema.reviewItems.id, [...wanted]),
+      where: inArray(
+        schema.reviewItems.id,
+        [...new Set(plan.map((slot) => slot.reviewItemId))],
+      ),
     });
 
     const loIds = [...new Set(plan.map((slot) => slot.loId))];
@@ -130,7 +133,7 @@ export const dailyKind: SessionKind<DailyMaterial> = {
 
     const next = material.plan.find((slot) => !asked.has(slot.reviewItemId));
     if (!next) {
-      // Ten questions, then the student's own account of them.
+      // The questions, then the student's own account of them.
       if (attempts.some((attempt) => attempt.stage === "reflection")) return null;
       return { stage: "reflection", loId: null, reviewItemId: null };
     }
@@ -148,6 +151,7 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       ),
       bucket: next.bucket,
       tier: next.tier,
+      order: next.order,
     };
   },
 
@@ -165,52 +169,37 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       throw new Error(`Daily turn has no matching objective for loId ${turn.loId}.`);
     }
 
-    const lectureTitleFor = (objective: ObjectiveRow): string => {
-      const title = material.lectureTitleById.get(objective.lectureId);
-      if (!title) {
-        throw new Error(`No lecture title found for lecture ${objective.lectureId}.`);
-      }
-      return title;
-    };
+    const lectureTitle = material.lectureTitleById.get(objective.lectureId);
+    if (!lectureTitle) {
+      throw new Error(`No lecture title found for lecture ${objective.lectureId}.`);
+    }
 
     const item = turn.reviewItemId === null ? undefined : material.itemById.get(turn.reviewItemId);
-    const slot = material.plan.find((s) => s.reviewItemId === turn.reviewItemId);
 
-    const flatten = (row: ReviewItemRow, lectureTitle?: string): ConceptContext => ({
+    const flatten = (row: ReviewItemRow): ConceptContext => ({
       concept: row.concept,
       kind: row.kind,
       provenance: row.provenance,
-      ...(lectureTitle ? { lectureTitle } : {}),
+      ordinal: row.ordinal,
     });
 
-    const siblings = (material.siblingsByLo.get(objective.id) ?? []).filter(
-      (row) => row.id !== item?.id,
-    );
-
-    const companions = (slot?.companionItemIds ?? [])
-      .map((id) => material.itemById.get(id))
-      .filter((row): row is ReviewItemRow => row !== undefined)
-      .map((row) => {
-        const owner = material.objectiveById.get(row.loId);
-        if (!owner) {
-          throw new Error(`Companion review item ${row.id} has no matching objective.`);
-        }
-        return flatten(row, lectureTitleFor(owner));
-      });
+    // The objective's concepts in their numbered order, the target among them.
+    const concepts = [...(material.siblingsByLo.get(objective.id) ?? [])]
+      .sort((a, b) => a.ordinal - b.ordinal || a.id - b.id)
+      .map(flatten);
+    if (item && !concepts.some((c) => c.concept === item.concept)) {
+      concepts.unshift(flatten(item));
+    }
 
     return {
       stage: "daily",
-      lectureTitle: lectureTitleFor(objective),
+      lectureTitle,
       objective: objective.text,
       targetConcept: item?.concept,
       ...(item && material.priorByItem.has(item.id)
         ? { lastAttempt: material.priorByItem.get(item.id) }
         : {}),
-      concepts: [
-        ...(item ? [flatten(item)] : []),
-        ...siblings.map((row) => flatten(row)),
-        ...companions,
-      ],
+      concepts,
     };
   },
 
@@ -241,6 +230,7 @@ export const dailyKind: SessionKind<DailyMaterial> = {
       bucket: slot.bucket,
       // A plan frozen before tiers existed carries none; the row can say.
       tier: slot.tier ?? tierOf(item),
+      order: slot.order,
       lapses: item.lapses,
       streak: item.streak,
       intervalDays: item.intervalDays,
