@@ -5,7 +5,7 @@ import type {
   PracticeQuestionContext,
   QuestionFormat,
 } from "@/lib/tutor";
-import { DEFAULT_MINUTES, sameDayBudget } from "./budget";
+import { DEFAULT_MINUTES, reviewBudget } from "./budget";
 import type { SessionKind } from "./kind";
 import { planNextTurn, type GradedTurn, type PlannedObjective } from "./plan";
 import { allowedFormats, FORMAT_FAMILY } from "./select";
@@ -109,7 +109,7 @@ export const sameDayKind: SessionKind<SameDayMaterial> = {
     }
 
     const active = objectives.filter((objective) => !objective.suspended).length;
-    const { los, perLo } = sameDayBudget(session.minutes ?? DEFAULT_MINUTES, active);
+    const { los, perLo } = reviewBudget(session.minutes ?? DEFAULT_MINUTES, active);
 
     return { lectureTitle: lecture.title, objectives, itemsByLo, practiceByLo, budget: { los, perLo } };
   },
@@ -127,6 +127,7 @@ export const sameDayKind: SessionKind<SameDayMaterial> = {
 
     const objectives: PlannedObjective[] = material.objectives.map((objective) => ({
       id: objective.id,
+      lectureId: objective.lectureId,
       orderIndex: objective.orderIndex,
       suspended: objective.suspended,
       items: (material.itemsByLo.get(objective.id) ?? []).map((item) => ({

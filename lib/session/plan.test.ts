@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import { planNextTurn, type GradedTurn, type PlannedObjective } from "./plan";
+import { chooseObjectives, planNextTurn, type GradedTurn, type PlannedObjective } from "./plan";
 
 /** Two objectives, three numbered concepts each: items 11–13 and 21–23. */
 const objectives: PlannedObjective[] = [
-  { id: 1, orderIndex: 0, suspended: false, items: [11, 12, 13].map((id, i) => ({ id, ordinal: i + 1 })) },
-  { id: 2, orderIndex: 1, suspended: false, items: [21, 22, 23].map((id, i) => ({ id, ordinal: i + 1 })) },
+  { id: 1, lectureId: 1, orderIndex: 0, suspended: false, items: [11, 12, 13].map((id, i) => ({ id, ordinal: i + 1 })) },
+  { id: 2, lectureId: 1, orderIndex: 1, suspended: false, items: [21, 22, 23].map((id, i) => ({ id, ordinal: i + 1 })) },
 ];
 
 const recalled = (loId: number, marks: GradedTurn["marks"] = []): GradedTurn => ({
@@ -34,8 +34,8 @@ test("recalls each objective before probing it", () => {
 
 test("follows objective order, not insertion order", () => {
   const reversed: PlannedObjective[] = [
-    { id: 9, orderIndex: 1, suspended: false, items: [] },
-    { id: 4, orderIndex: 0, suspended: false, items: [] },
+    { id: 9, lectureId: 1, orderIndex: 1, suspended: false, items: [] },
+    { id: 4, lectureId: 1, orderIndex: 0, suspended: false, items: [] },
   ];
 
   expect(planNextTurn(reversed, [], FULL)?.loId).toBe(4);
@@ -106,6 +106,7 @@ test("a perLo of one means recall only", () => {
 test("a short budget covers a spaced subset of the objectives, first and last included", () => {
   const five: PlannedObjective[] = [1, 2, 3, 4, 5].map((id, i) => ({
     id,
+    lectureId: 1,
     orderIndex: i,
     suspended: false,
     items: [],
@@ -169,4 +170,60 @@ test("the session closes with the reflection once every objective is done", () =
 test("planning is stable: the same state yields the same next turn", () => {
   const graded = [recalled(1)];
   expect(planNextTurn(objectives, graded, FULL)).toEqual(planNextTurn(objectives, graded, FULL)!);
+});
+
+/** `count` objectives on one lecture, ids `lectureId * 100 + n`. */
+function lectureOf(lectureId: number, count: number): PlannedObjective[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: lectureId * 100 + i + 1,
+    lectureId,
+    orderIndex: i,
+    suspended: false,
+    items: [],
+  }));
+}
+
+const idsOf = (objectives: PlannedObjective[]) => objectives.map((o) => o.id);
+
+test("chosen lectures share the budget in proportion to their objectives, spaced within each", () => {
+  // Six and two objectives, five to cover: 3.75 and 1.25 → 4 and 1 by largest remainder.
+  const chosen = chooseObjectives([...lectureOf(1, 6), ...lectureOf(2, 2)], 5);
+  expect(idsOf(chosen)).toEqual([101, 201, 103, 104, 106]);
+});
+
+test("lectures take turns: the running order alternates while both have objectives left", () => {
+  const chosen = chooseObjectives([...lectureOf(1, 3), ...lectureOf(2, 3)], 4);
+  expect(idsOf(chosen)).toEqual([101, 201, 103, 203]);
+});
+
+test("a budget that covers everything takes every objective, still alternating lectures", () => {
+  const chosen = chooseObjectives([...lectureOf(2, 2), ...lectureOf(1, 3)], 10);
+  expect(idsOf(chosen)).toEqual([101, 201, 102, 202, 103]);
+});
+
+test("a chosen lecture is never left out while the budget covers every lecture", () => {
+  // Ten and one, three to cover: 2.73 and 0.27 would round to 3 and 0.
+  const chosen = chooseObjectives([...lectureOf(1, 10), ...lectureOf(2, 1)], 3);
+  expect(idsOf(chosen)).toEqual([101, 201, 110]);
+});
+
+test("a budget smaller than the lecture count covers the larger lectures", () => {
+  const chosen = chooseObjectives([...lectureOf(1, 4), ...lectureOf(2, 1), ...lectureOf(3, 1)], 1);
+  expect(idsOf(chosen)).toEqual([101]);
+});
+
+test("across two lectures, a recall on one is followed by a recall on the other", () => {
+  const two = [...lectureOf(1, 2), ...lectureOf(2, 2)];
+  const options = { reflected: false, los: 4, perLo: 1 };
+
+  const sequence: number[] = [];
+  const graded: GradedTurn[] = [];
+  for (let guard = 0; guard < 10; guard++) {
+    const next = planNextTurn(two, graded, options);
+    if (!next || next.stage !== "lo_recall") break;
+    sequence.push(next.loId!);
+    graded.push(recalled(next.loId!));
+  }
+
+  expect(sequence).toEqual([101, 201, 102, 202]);
 });

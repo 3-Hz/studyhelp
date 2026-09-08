@@ -39,10 +39,10 @@ export function dailyBudget(minutes: number): Budget {
 
 /**
  * Breadth first: every objective once before any objective twice, since a
- * same-day review is the lecture's only pass through all of them. Depth is
+ * review is the chosen lectures' one pass through all of them. Depth is
  * whatever is left over, capped so one objective never eats the session.
  */
-export function sameDayBudget(minutes: number, activeLoCount: number): Budget {
+export function reviewBudget(minutes: number, activeLoCount: number): Budget {
   const { questions } = budgetFor(minutes);
   const los = Math.min(activeLoCount, questions);
   const perLo = los === 0 ? 1 : Math.min(MAX_PER_LO, Math.max(1, Math.floor(questions / los)));

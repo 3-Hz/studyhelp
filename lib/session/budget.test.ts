@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { budgetFor, dailyBudget, DEFAULT_MINUTES, sameDayBudget, spacedSubset } from "./budget";
+import { budgetFor, dailyBudget, DEFAULT_MINUTES, reviewBudget, spacedSubset } from "./budget";
 
 test("twenty minutes is ten questions, two per objective", () => {
   expect(budgetFor(20)).toEqual({ questions: 10, perLo: 2 });
@@ -31,21 +31,21 @@ test("a daily budget covers as many objectives as the questions allow at that de
 
 test("a same-day budget prefers breadth: every objective once before any twice", () => {
   // Twelve objectives, five questions: five objectives, one question each.
-  expect(sameDayBudget(10, 12)).toEqual({ questions: 5, perLo: 1, los: 5 });
+  expect(reviewBudget(10, 12)).toEqual({ questions: 5, perLo: 1, los: 5 });
   // Twelve objectives, fifteen questions: all twelve, one each.
-  expect(sameDayBudget(30, 12)).toEqual({ questions: 15, perLo: 1, los: 12 });
+  expect(reviewBudget(30, 12)).toEqual({ questions: 15, perLo: 1, los: 12 });
   // Four objectives, fifteen questions: all four, three each.
-  expect(sameDayBudget(30, 4)).toEqual({ questions: 15, perLo: 3, los: 4 });
+  expect(reviewBudget(30, 4)).toEqual({ questions: 15, perLo: 3, los: 4 });
   // Six objectives, ten questions: all six, one each — never a fraction.
-  expect(sameDayBudget(20, 6)).toEqual({ questions: 10, perLo: 1, los: 6 });
+  expect(reviewBudget(20, 6)).toEqual({ questions: 10, perLo: 1, los: 6 });
 });
 
 test("a same-day budget never plans more than three questions on one objective", () => {
-  expect(sameDayBudget(60, 2).perLo).toBe(3);
+  expect(reviewBudget(60, 2).perLo).toBe(3);
 });
 
 test("a same-day budget for a lecture with no objectives plans nothing", () => {
-  expect(sameDayBudget(20, 0)).toEqual({ questions: 10, perLo: 1, los: 0 });
+  expect(reviewBudget(20, 0)).toEqual({ questions: 10, perLo: 1, los: 0 });
 });
 
 test("spacedSubset keeps the first and last and spreads the rest evenly", () => {
