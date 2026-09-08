@@ -183,7 +183,6 @@ export async function currentTurn(
     ...context,
     usedFormats: loaded.attempts.map((a) => a.format as QuestionFormat),
     allowedFormats: planned.allowedFormats,
-    bucket: planned.bucket,
     tier: planned.tier,
     order: planned.order,
   });

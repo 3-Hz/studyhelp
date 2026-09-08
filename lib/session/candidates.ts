@@ -1,6 +1,5 @@
 import { db, schema } from "@/lib/db";
 import type { Score } from "@/lib/db/schema";
-import { todayIso } from "@/lib/schedule";
 import type { ItemCandidate, LoCandidate } from "./select";
 
 /**
@@ -65,9 +64,7 @@ export async function dailyCandidates(): Promise<LoCandidate[]> {
     candidates.push({
       loId: objective.id,
       lectureId: lecture.id,
-      block: lecture.block,
       suspended: objective.suspended,
-      lectureCommittedOn: todayIso(lecture.committedAt),
       scores: scoresByLo.get(objective.id) ?? [],
       items: itemsByLo.get(objective.id) ?? [],
     });

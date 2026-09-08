@@ -107,11 +107,11 @@ function stubTutor(scores: Score[]): TutorDeps {
 /** Wraps a tutor's askQuestion to record every context it was called with. */
 function recordingTutor(
   base: TutorDeps,
-  contexts: { bucket?: string; tier?: string }[],
+  contexts: { tier?: string }[],
 ): TutorDeps {
   return {
     askQuestion: async (context) => {
-      contexts.push({ bucket: context.bucket, tier: context.tier });
+      contexts.push({ tier: context.tier });
       return base.askQuestion(context);
     },
     gradeAnswer: base.gradeAnswer,
@@ -225,7 +225,7 @@ test("every turn names the review item it is testing, and formats stay varied", 
 
 test("the reflection turn is the eleventh and costs no question call", async () => {
   const sessionId = await startDailySession();
-  const contexts: { bucket?: string }[] = [];
+  const contexts: { tier?: string }[] = [];
   const tutor = recordingTutor(stubTutor([]), contexts);
 
   for (let i = 0; i < 10; i++) {
@@ -244,21 +244,6 @@ test("the reflection turn is the eleventh and costs no question call", async () 
   expect(await submitAnswer(sessionId, "I got the precursor wrong.", tutor)).toBeNull();
   expect(await currentTurn(sessionId, tutor)).toBeNull();
   await finishSession(sessionId, { deps: tutor });
-});
-
-test("a due-bucket slot's context carries the bucket, so its brief can differ from a fresh item's", async () => {
-  const sessionId = await startDailySession();
-
-  const contexts: { bucket?: string }[] = [];
-  const tutor = recordingTutor(stubTutor([]), contexts);
-
-  await playThrough(sessionId, tutor);
-  await finishSession(sessionId, { deps: tutor });
-
-  // Every review item is freshly committed and so due today, which puts the
-  // "due" bucket's quota of four ahead of "weak" and "recent" in select()'s
-  // fill order — this is guaranteed by the fixture, not by luck.
-  expect(contexts.some((context) => context.bucket === "due")).toBe(true);
 });
 
 test("finishing reschedules only the items actually asked", async () => {
@@ -391,18 +376,16 @@ test("every daily question carries the item's tier, and a 2 makes it relearning 
   await finishSession(first, { deps: redTutor });
 
   const second = await startDailySession();
-  const contexts: { bucket?: string; tier?: string }[] = [];
+  const contexts: { tier?: string }[] = [];
   const tutor = recordingTutor(stubTutor([]), contexts);
   await playThrough(second, tutor);
   await finishSession(second, { deps: tutor });
 
   expect(contexts).toHaveLength(10);
   expect(contexts.every((context) => context.tier !== undefined)).toBe(true);
-  // Ten reds make ten relearning items; the weak bucket alone surfaces two.
-  // Residual weak state from earlier tests cannot crowd them out: the ten
-  // reds carry lapses >= 1 and lastRating red, so under weakness() they
-  // outrank any item that is weak only through objective history — and the
-  // assertion is `some`, not `every`.
+  // Ten reds make ten relearning items, each due tomorrow and so among the
+  // most overdue in the pool; earlier tests' residue cannot crowd all of
+  // them out — and the assertion is `some`, not `every`.
   expect(contexts.some((context) => context.tier === "relearning")).toBe(true);
 });
 
@@ -420,7 +403,6 @@ test("a plan frozen before tiers existed still explains its turns from the row",
       plan: [
         {
           slot: 1,
-          bucket: "fill",
           loId: objective!.id,
           reviewItemId: item!.id,
           formatFamily: FORMAT_FAMILY[item!.kind],
@@ -447,7 +429,6 @@ test("the feedback explains the turn; the question does not", async () => {
 
   const feedback = await submitAnswer(sessionId, "An answer.", tutor);
   expect(feedback?.why).toBeDefined();
-  expect(["due", "weak", "recent", "interleaved", "fill"]).toContain(feedback!.why!.bucket);
   expect(["new", "relearning", "consolidating", "mature"]).toContain(feedback!.why!.tier);
   expect(feedback!.why!.dueOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   expect(feedback!.why!.intervalDays).toBeGreaterThanOrEqual(0);

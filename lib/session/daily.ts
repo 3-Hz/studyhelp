@@ -168,7 +168,6 @@ export const dailyKind: SessionKind<DailyMaterial> = {
         used,
         used[used.length - 1],
       ),
-      bucket: next.bucket,
       tier: next.tier,
       order: next.order,
     };
@@ -240,7 +239,6 @@ export const dailyKind: SessionKind<DailyMaterial> = {
     const item = material.itemById.get(turn.reviewItemId);
     if (!slot || !item) return undefined;
     return {
-      bucket: slot.bucket,
       // A plan frozen before tiers existed carries none; the row can say.
       tier: slot.tier ?? tierOf(item),
       order: slot.order,

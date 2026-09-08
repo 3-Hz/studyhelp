@@ -427,20 +427,6 @@ test("the tier alone no longer steers the question", async () => {
   expect(prompts[0]).not.toMatch(/application or discrimination/i);
 });
 
-test("the bucket no longer reaches the prompt", async () => {
-  const { prompts } = capture();
-  const model = new MockLanguageModelV4({
-    doGenerate: async (options) => {
-      prompts.push(JSON.stringify(options.prompt));
-      return textResult('{"format":"free_recall","question":"Explain."}');
-    },
-  });
-
-  await askQuestion({ ...context, stage: "daily", bucket: "due" }, { profile, model });
-  expect(prompts[0]).not.toMatch(/spaced review/i);
-  expect(prompts[0]).not.toMatch(/gone badly/i);
-});
-
 test("the last attempt reaches the prompt, with a steer that depends on order", async () => {
   const { prompts } = capture();
   const model = new MockLanguageModelV4({

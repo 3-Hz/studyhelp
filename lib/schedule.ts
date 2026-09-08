@@ -197,9 +197,9 @@ export interface TierState {
 /**
  * How far an item has come, from the four fields on its row.
  *
- * "relearning", not "weak": select() has a weak bucket with a broader meaning
- * that includes the objective's dashboard history. Bucket says why an item
- * was chosen today; tier is the badge's account of how far it has come. No
+ * "relearning", not "weak": select()'s weakness() means more — it reads
+ * the objective's dashboard history too — and decides what is chosen today.
+ * Tier is the badge's account of how far an item has come. No
  * single mark reaches mature — that takes three greens in a row and a
  * fortnight's interval.
  */

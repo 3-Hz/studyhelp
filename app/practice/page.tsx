@@ -78,10 +78,11 @@ export default async function PracticePage() {
           <p className="mt-3 text-sm text-stone-600 dark:text-stone-400">
             Pick how long you have. Twenty minutes is ten questions on five
             objectives, two each; longer goes deeper, shorter goes wider.
-            Objectives due for review come first, then weak spots, recent
-            material, and one from another lecture, switching lectures as it
-            goes. Each question is first-, second- or third-order by how the
-            objective went last time. Nothing due yet is practised early
+            Objectives whose concepts are most overdue come first, a weaker
+            history breaking ties; at most a third of the session comes from
+            one lecture, and consecutive objectives come from different
+            lectures. Each question is first-, second- or third-order by how
+            the objective went last time. Nothing due yet is practised early
             rather than skipped.
           </p>
 

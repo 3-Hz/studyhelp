@@ -8,8 +8,6 @@ import type {
   giveHint,
   summariseSession,
 } from "@/lib/tutor";
-import type { Bucket } from "./select";
-
 export type SessionRow = typeof schema.sessions.$inferSelect;
 export type AttemptRow = typeof schema.attempts.$inferSelect;
 
@@ -31,8 +29,6 @@ export interface TurnRef {
 export interface PlannedTurn extends TurnRef {
   /** Formats the model may choose from. Omitted means any. */
   allowedFormats?: QuestionFormat[];
-  /** Why select() picked this slot for daily practice. Absent for same-day turns. */
-  bucket?: Bucket;
   /** The item's mastery tier, from the plan. Absent for same-day turns. */
   tier?: Tier;
   /** How demanding the question should be, from the plan. */
@@ -63,7 +59,6 @@ export interface MarkedConcept extends ConceptMark {
  * calibration literature wants removed.
  */
 export interface TurnWhy {
-  bucket: Bucket;
   tier: Tier;
   /** Absent on a plan frozen before orders existed. */
   order?: QuestionOrder;

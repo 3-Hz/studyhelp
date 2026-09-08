@@ -3,7 +3,6 @@ import type { Mark, Score, SessionStage } from "@/lib/db/schema";
 import { profileFor, type ModelProfile } from "@/lib/llm/config";
 import { generateStructured } from "@/lib/llm/structured";
 import type { QuestionOrder, Tier } from "@/lib/schedule";
-import type { Bucket } from "@/lib/session/select";
 import {
   DebriefOutput,
   GradeOutput,
@@ -66,11 +65,6 @@ export interface TurnContext {
   usedFormats?: QuestionFormat[];
   /** The formats this turn may use. Enforced through the output schema. */
   allowedFormats?: QuestionFormat[];
-  /**
-   * Why select() chose this item for today's daily plan — due, weak, recent,
-   * interleaved, fill. Absent for same-day turns, which have no such notion.
-   */
-  bucket?: Bucket;
   /** The item's mastery tier: shown on the badge after grading, not read by the prompt. */
   tier?: Tier;
   /**

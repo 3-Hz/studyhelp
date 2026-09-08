@@ -77,9 +77,9 @@ test("a committed lecture contributes one candidate per objective, carrying its 
     .values({ date: "2026-09-02" })
     .returning({ id: schema.studyDates.id });
 
-  // Distinct values per field: with commitLecture's defaults, dueOn and
-  // lectureCommittedOn are both today and intervalDays and lapses are both 0,
-  // so a crossed mapping between them would pass unnoticed.
+  // Distinct values per field: with commitLecture's defaults, intervalDays
+  // and lapses are both 0, so a crossed mapping between them would pass
+  // unnoticed.
   await db
     .update(schema.reviewItems)
     .set({
@@ -90,11 +90,6 @@ test("a committed lecture contributes one candidate per objective, carrying its 
       lastRating: "yellow",
     })
     .where(eq(schema.reviewItems.loId, objective!.id));
-
-  await db
-    .update(schema.lectures)
-    .set({ committedAt: new Date("2026-08-20T12:00:00Z") })
-    .where(eq(schema.lectures.id, lecture.id));
 
   // Inserted newest first, to prove the history is sorted by date and not by
   // insertion order.
@@ -126,9 +121,7 @@ test("a committed lecture contributes one candidate per objective, carrying its 
   expect(candidates[0]).toEqual({
     loId: objective!.id,
     lectureId: lecture.id,
-    block: "Renal",
     suspended: false,
-    lectureCommittedOn: "2026-08-20",
     // Oldest first: red on the 1st, green on the 2nd.
     scores: [2, 5],
     items: [

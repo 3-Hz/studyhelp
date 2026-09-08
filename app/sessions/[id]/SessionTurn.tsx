@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Score } from "@/lib/db/schema";
 import { todayIso } from "@/lib/schedule";
 import type { MarkedConcept, Outcome, TurnWhy } from "@/lib/session/kind";
-import type { Bucket } from "@/lib/session/select";
 import type { DebriefOutput, GradeOutput } from "@/lib/tutor/schema";
 import { MARK_LABEL, MARK_STYLE, SCORE_LABEL, SCORES_DESC, scoreStyle } from "@/app/components/scores";
 import { Debrief } from "./Debrief";
@@ -46,14 +45,6 @@ const STAGE_LABEL: Record<Turn["stage"], string> = {
   reflection: "Reflection",
 };
 
-const BUCKET_LABEL: Record<Bucket, string> = {
-  due: "Due for review",
-  recent: "Recent material",
-  weak: "Weak spot",
-  interleaved: "Another lecture",
-  fill: "Extra practice",
-};
-
 function monthDay(iso: string): string {
   return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
     month: "short",
@@ -64,7 +55,7 @@ function monthDay(iso: string): string {
 /** One line: why this question was shaped as it was. Rendered after grading only. */
 function whyLine(why: TurnWhy): string {
   const today = todayIso();
-  const parts = [BUCKET_LABEL[why.bucket]];
+  const parts: string[] = [];
   if (why.order) parts.push(`${why.order}-order`);
   parts.push(why.tier);
   if (why.lapses > 0) parts.push(`lapsed ${why.lapses}×`);

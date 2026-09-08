@@ -13,26 +13,19 @@ import type { QuestionFormat } from "@/lib/tutor";
  * Choosing the day's objectives and the questions on each, per new_prompt.txt
  * "Repetition Quiz Session": spaced by time since last review and performance
  * history, interleaved by switching between lectures, one objective at a
- * time, never combining objectives. The mix keeps prompt.txt's proportions —
- * due, weak, recent, interleaved — as shares of the objectives covered.
+ * time, never combining objectives.
+ *
+ * One ranking does the choosing: the objective whose concept is most overdue
+ * comes first, dashboard weakness breaks ties, then never having been
+ * scored. Each concept keeps its own expanding interval (lib/schedule.ts),
+ * the Leitner model Make It Stick recommends, so "time since last review"
+ * is read off the concept's due date rather than estimated for the
+ * objective as a whole.
  *
  * Pure by design — no database, no clock, no randomness. Ties break on ids,
  * so a test can assert an exact plan and a session can be explained after
  * the fact.
  */
-
-/** A lecture counts as recent for a week after it reaches the dashboard. */
-export const RECENT_DAYS = 7;
-
-export type Bucket = "due" | "weak" | "recent" | "interleaved" | "fill";
-
-/** The mix, as shares of the objectives a session covers: prompt.txt's 4/2/2/2 of ten. */
-const MIX: { bucket: Exclude<Bucket, "fill">; share: number }[] = [
-  { bucket: "due", share: 0.4 },
-  { bucket: "weak", share: 0.2 },
-  { bucket: "recent", share: 0.2 },
-  { bucket: "interleaved", share: 0.2 },
-];
 
 /** A review item, as selection sees it. */
 export interface ItemCandidate {
@@ -51,9 +44,7 @@ export interface ItemCandidate {
 export interface LoCandidate {
   loId: number;
   lectureId: number;
-  block: string | null;
   suspended: boolean;
-  lectureCommittedOn: string;
   /** The objective's dashboard scores, oldest first. */
   scores: Score[];
   items: ItemCandidate[];
@@ -62,7 +53,6 @@ export interface LoCandidate {
 export interface PlannedSlot {
   /** 1-based position in the running order. */
   slot: number;
-  bucket: Bucket;
   /**
    * How demanding the question is, from the objective's latest score. Frozen
    * with the plan, like the tier: the row does not change until finish, and
@@ -122,9 +112,9 @@ export function itemWeakness(item: ItemCandidate): number {
 
 /**
  * How badly an objective has been going: its weakest concept, plus its last
- * three dashboard scores weighted by band. prompt.txt: "Review the full LO
- * history, not only the latest color." Three reds and then a five still
- * scores 4 — one good day does not erase the record.
+ * three dashboard scores weighted by band — the "performance history" the
+ * new prompt reads off the Dashboard. Three reds and then a five still
+ * scores 4: one good day does not erase the record.
  */
 export function weakness(candidate: LoCandidate): number {
   const weakestItem = Math.max(0, ...candidate.items.map(itemWeakness));
@@ -132,15 +122,6 @@ export function weakness(candidate: LoCandidate): number {
     .slice(-3)
     .reduce((sum, score) => sum + HISTORY_WEIGHT[band(score)], 0);
   return weakestItem + recent;
-}
-
-function isWeak(candidate: LoCandidate): boolean {
-  return (
-    candidate.items.some(
-      (item) =>
-        item.lastRating === "red" || item.lastRating === "yellow" || item.lapses > 0,
-    ) || candidate.scores.slice(-3).some((score) => band(score) !== "green")
-  );
 }
 
 /**
@@ -192,11 +173,6 @@ const highestFirst =
   (a, b) =>
     score(b) - score(a);
 
-interface Pick {
-  candidate: LoCandidate;
-  bucket: Bucket;
-}
-
 export function select(
   candidates: LoCandidate[],
   opts: { today: string; los: number; perLo: number },
@@ -205,122 +181,39 @@ export function select(
 
   const pool = candidates.filter(isEligible);
 
-  const picks: Pick[] = [];
-  const takenLos = new Set<number>();
-  const perLecture = new Map<number, number>();
-  // Without a cap, one freshly committed lecture takes the whole session.
-  const cap = Math.max(1, Math.ceil(los / 3));
-
+  // Days past the objective's earliest due date. Negative means nothing is
+  // owed yet: such an objective sorts last but still fills a thin session —
+  // practising early costs a little efficiency, skipping costs the session.
   const overdueBy = (c: LoCandidate) =>
     Math.max(...c.items.map((item) => daysBetween(item.dueOn, today)));
-  const lectureAge = (c: LoCandidate) => daysBetween(c.lectureCommittedOn, today);
-  const byLo = (c: LoCandidate) => c.loId;
 
-  function represented(): Set<number> {
-    return new Set(picks.map((pick) => pick.candidate.lectureId));
-  }
+  const ranked = [...pool].sort(
+    compose<LoCandidate>(
+      (c) => c.loId,
+      highestFirst(overdueBy),
+      highestFirst(weakness),
+      highestFirst((c) => (latestScore(c) === null ? 1 : 0)),
+    ),
+  );
 
-  /** The block most of the session already sits in, if there is one. */
-  function modalBlock(): string | null {
-    const counts = new Map<string, number>();
-    for (const pick of picks) {
-      const block = pick.candidate.block;
-      if (block) counts.set(block, (counts.get(block) ?? 0) + 1);
+  // Without a cap, one freshly committed lecture takes the whole session.
+  // The cap gives way only when nothing under it remains.
+  const cap = Math.max(1, Math.ceil(los / 3));
+  const picks: LoCandidate[] = [];
+  const taken = new Set<number>();
+  const perLecture = new Map<number, number>();
+
+  for (const strict of [true, false]) {
+    for (const candidate of ranked) {
+      if (picks.length >= los) break;
+      if (taken.has(candidate.loId)) continue;
+      const fromLecture = perLecture.get(candidate.lectureId) ?? 0;
+      if (strict && fromLecture >= cap) continue;
+
+      picks.push(candidate);
+      taken.add(candidate.loId);
+      perLecture.set(candidate.lectureId, fromLecture + 1);
     }
-    let best: string | null = null;
-    let bestCount = 0;
-    for (const [block, count] of counts) {
-      if (count > bestCount) {
-        best = block;
-        bestCount = count;
-      }
-    }
-    return best;
-  }
-
-  /** The best remaining objective, relaxing the lecture cap only if it must. */
-  function pick(
-    options: LoCandidate[],
-    compare: Comparator<LoCandidate>,
-  ): LoCandidate | undefined {
-    const strict = options.filter(
-      (c) => !takenLos.has(c.loId) && (perLecture.get(c.lectureId) ?? 0) < cap,
-    );
-    const loose = options.filter((c) => !takenLos.has(c.loId));
-
-    for (const list of [strict, loose]) {
-      if (list.length > 0) return [...list].sort(compare)[0];
-    }
-    return undefined;
-  }
-
-  function take(
-    bucket: Bucket,
-    want: number,
-    eligible: (c: LoCandidate) => boolean,
-    compare: () => Comparator<LoCandidate>,
-  ): number {
-    let filled = 0;
-    while (filled < want && picks.length < los) {
-      const chosen = pick(pool.filter(eligible), compare());
-      if (!chosen) break;
-
-      picks.push({ candidate: chosen, bucket });
-      takenLos.add(chosen.loId);
-      perLecture.set(chosen.lectureId, (perLecture.get(chosen.lectureId) ?? 0) + 1);
-      filled++;
-    }
-    return filled;
-  }
-
-  const eligibleFor: Record<Exclude<Bucket, "fill">, (c: LoCandidate) => boolean> = {
-    due: (c) => isDue(c, today),
-    weak: isWeak,
-    recent: (c) => lectureAge(c) <= RECENT_DAYS,
-    interleaved: (c) => !represented().has(c.lectureId),
-  };
-
-  const compareFor: Record<Exclude<Bucket, "fill">, () => Comparator<LoCandidate>> = {
-    due: () => compose(byLo, highestFirst(overdueBy), highestFirst(weakness)),
-    weak: () => compose(byLo, highestFirst(weakness), highestFirst(overdueBy)),
-    recent: () =>
-      compose(
-        byLo,
-        highestFirst((c) => (latestScore(c) === null ? 1 : 0)),
-        (a, b) => lectureAge(a) - lectureAge(b),
-      ),
-    interleaved: () => {
-      const block = modalBlock();
-      return compose(
-        byLo,
-        highestFirst((c) => (block !== null && c.block === block ? 1 : 0)),
-        highestFirst((c) => c.scores.length),
-        highestFirst((c) => Math.max(0, ...c.items.map((item) => item.intervalDays))),
-      );
-    },
-  };
-
-  // An underfilled bucket hands its slots to the next one rather than
-  // shortening the session: practising something not yet owed costs a little
-  // efficiency, and nothing else.
-  let carry = 0;
-  for (const { bucket, share } of MIX) {
-    // Interleaving is worth its own share and no more. Handing it a large
-    // carry would turn a thin day into a tour of unrelated lectures, so its
-    // overflow goes to the fallback fill below instead.
-    const quota = Math.round(los * share) + (bucket === "interleaved" ? 0 : carry);
-    const want = Math.min(quota, los - picks.length);
-    const filled = take(bucket, want, eligibleFor[bucket], compareFor[bucket]);
-    if (bucket !== "interleaved") carry = want - filled;
-  }
-
-  if (picks.length < los) {
-    take(
-      "fill",
-      los - picks.length,
-      () => true,
-      () => compose(byLo, highestFirst(overdueBy), highestFirst(weakness)),
-    );
   }
 
   return order(picks, perLo, today);
@@ -331,17 +224,16 @@ export function select(
  * which is what interleaving is for, and an objective's questions stay
  * together, so the student sees one objective at a time.
  */
-function order(picks: Pick[], perLo: number, today: string): PlannedSlot[] {
+function order(picks: LoCandidate[], perLo: number, today: string): PlannedSlot[] {
   const slots: PlannedSlot[] = [];
-  for (const pick of interleave(picks)) {
-    const questionOrder = orderFor(latestScore(pick.candidate));
-    for (const item of itemsFor(pick.candidate, perLo, today)) {
+  for (const candidate of interleave(picks)) {
+    const questionOrder = orderFor(latestScore(candidate));
+    for (const item of itemsFor(candidate, perLo, today)) {
       slots.push({
         slot: slots.length + 1,
-        bucket: pick.bucket,
         order: questionOrder,
         tier: tierOf(item),
-        loId: pick.candidate.loId,
+        loId: candidate.loId,
         reviewItemId: item.reviewItemId,
         formatFamily: FORMAT_FAMILY[item.kind],
       });
@@ -362,16 +254,16 @@ function itemsFor(candidate: LoCandidate, perLo: number, today: string): ItemCan
 }
 
 /** Greedy: take the next objective whose lecture differs from the last. */
-function interleave(picks: Pick[]): Pick[] {
+function interleave(picks: LoCandidate[]): LoCandidate[] {
   const remaining = [...picks];
-  const out: Pick[] = [];
-  let previous: Pick | undefined;
+  const out: LoCandidate[] = [];
+  let previous: LoCandidate | undefined;
 
   while (remaining.length > 0) {
     let index = 0;
     if (previous) {
       const differs = remaining.findIndex(
-        (pick) => pick.candidate.lectureId !== previous!.candidate.lectureId,
+        (candidate) => candidate.lectureId !== previous!.lectureId,
       );
       index = Math.max(differs, 0);
     }

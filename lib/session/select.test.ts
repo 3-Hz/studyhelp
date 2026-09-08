@@ -6,7 +6,6 @@ import {
   itemWeakness,
   select,
   weakness,
-  type Bucket,
   type ItemCandidate,
   type LoCandidate,
 } from "./select";
@@ -38,9 +37,7 @@ function lo(
 ): LoCandidate {
   return {
     lectureId: overrides.loId,
-    block: "Renal",
     suspended: false,
-    lectureCommittedOn: "2020-01-01",
     scores: [],
     items: Array.from({ length: count }, (_, i) =>
       item({ reviewItemId: overrides.loId * 10 + i + 1, ordinal: i + 1, ...itemOverrides(i) }),
@@ -117,37 +114,27 @@ test("an objective with fewer items than perLo gives what it has", () => {
   expect(plan).toHaveLength(1);
 });
 
-test("the due bucket takes the most overdue objectives first: two of five", () => {
-  const candidates = many(8, () => ({}), () => ({}));
+test("the most overdue objectives come first", () => {
+  const candidates = many(8);
+  // Objective 1 is due 10 August, objective 8 on the 17th: the earlier the
+  // date, the longer overdue.
   candidates.forEach((candidate, i) => {
     for (const it of candidate.items) it.dueOn = `2026-08-${String(i + 10).padStart(2, "0")}`;
   });
 
   const plan = select(candidates, FIVE_BY_TWO);
-  const due = plan.filter((slot) => slot.bucket === "due");
-  expect(losOf(due)).toEqual([1, 2]);
-  expect(due).toHaveLength(4);
+  expect(losOf(plan)).toEqual([1, 2, 3, 4, 5]);
+  expect(plan).toHaveLength(10);
 });
 
-test("an underfilled bucket hands its slots on rather than shortening the session", () => {
-  // Two objectives are due; nothing is weak; everything is recent.
-  const candidates = many(
-    8,
-    () => ({ lectureCommittedOn: "2026-09-01" }),
-    () => ({}),
-  );
-  for (const candidate of candidates.slice(0, 2)) {
+test("objectives with nothing due still fill the session, after the overdue ones", () => {
+  const candidates = many(8);
+  for (const candidate of candidates.slice(5, 7)) {
     for (const it of candidate.items) it.dueOn = "2026-08-01";
   }
 
   const plan = select(candidates, FIVE_BY_TWO);
-  const tally: Record<Bucket, number> = { due: 0, weak: 0, recent: 0, interleaved: 0, fill: 0 };
-  for (const loId of losOf(plan)) tally[plan.find((slot) => slot.loId === loId)!.bucket]++;
-
-  // The weak bucket's unfilled slot carries to recent, which is why recent
-  // holds two rather than its quota of one — without the carry, fill would
-  // have taken it instead.
-  expect(tally).toEqual({ due: 2, weak: 0, recent: 2, interleaved: 1, fill: 0 });
+  expect(losOf(plan)).toEqual([6, 7, 1, 2, 3]);
   expect(plan).toHaveLength(10);
 });
 
@@ -237,37 +224,38 @@ test("no slot combines lectures: every slot's family is its own item's kind", ()
   }
 });
 
-test("the default mix at five objectives is two due, one weak, one recent, one interleaved", () => {
-  const due = many(2, () => ({}), () => ({ dueOn: "2026-08-01" }));
-  const weak = lo({ loId: 3 }, 2, () => ({ lastRating: "red" })); // weakness 3
-  const recent = lo({ loId: 4, lectureCommittedOn: "2026-08-28" });
-  const filler = [lo({ loId: 5 }), lo({ loId: 6 })];
-  // A weaker weak-eligible objective and an older recent one: each stays on
-  // the table at the correct quota, so a quota drifting up would move the tally.
-  const spareWeak = lo({ loId: 7 }, 2, () => ({ lastRating: "yellow" })); // weakness 1
-  const spareRecent = lo({ loId: 8, lectureCommittedOn: "2026-08-27" });
+test("among equally overdue objectives, the weaker dashboard history comes first", () => {
+  const overdue = () => ({ dueOn: "2026-08-01" });
+  const steady = lo({ loId: 1, scores: [5, 5, 5] }, 2, overdue); // weakness 0
+  const scarred = lo({ loId: 2, scores: [2, 2, 2] }, 2, overdue); // 6
+  const lapsed = lo({ loId: 3 }, 2, () => ({ ...overdue(), lapses: 2 })); // 4
+  const red = lo({ loId: 4 }, 2, () => ({ ...overdue(), lastRating: "red" })); // 3
 
-  const plan = select([...due, weak, recent, ...filler, spareWeak, spareRecent], FIVE_BY_TWO);
-
-  const bucketOf = new Map(plan.map((slot) => [slot.loId, slot.bucket]));
-  const tally: Record<Bucket, number> = { due: 0, weak: 0, recent: 0, interleaved: 0, fill: 0 };
-  for (const bucket of bucketOf.values()) tally[bucket]++;
-
-  expect(tally).toEqual({ due: 2, weak: 1, recent: 1, interleaved: 1, fill: 0 });
-  expect(bucketOf.get(3)).toBe("weak");
-  expect(bucketOf.get(4)).toBe("recent");
+  const plan = select([steady, scarred, lapsed, red], { today: TODAY, los: 3, perLo: 1 });
+  expect(losOf(plan)).toEqual([2, 3, 4]);
 });
 
-test("the weak bucket surfaces an objective with a red history even when nothing of it is due", () => {
-  const due = many(2, () => ({ lectureCommittedOn: "2000-01-01" }), () => ({ dueOn: "2026-08-01" }));
-  const scarred = lo({ loId: 5, scores: [2, 2, 2], lectureCommittedOn: "2000-01-01" }); // weakness 6
-  const lapsed = lo({ loId: 6, lectureCommittedOn: "2000-01-01" }, 2, () => ({ lapses: 2 })); // 4
-  const red = lo({ loId: 7, lectureCommittedOn: "2000-01-01" }, 2, () => ({ lastRating: "red" })); // 3
-  const filler = many(3, (i) => ({ loId: i + 8, lectureId: i + 8, lectureCommittedOn: "2000-01-01" }));
+test("overdue outranks weakness: a long-overdue steady objective beats a red one due today", () => {
+  const steady = lo({ loId: 1, scores: [5, 5, 5] }, 2, () => ({
+    dueOn: "2026-08-01",
+    lastRating: "green",
+  }));
+  const red = lo({ loId: 2, scores: [2] }, 2, () => ({
+    dueOn: TODAY,
+    lastRating: "red",
+    lapses: 1,
+  }));
 
-  const plan = select([...due, scarred, lapsed, red, ...filler], FIVE_BY_TWO);
-  const weakLos = losOf(plan.filter((slot) => slot.bucket === "weak"));
-  expect(weakLos).toEqual([5]);
+  const plan = select([steady, red], { today: TODAY, los: 1, perLo: 1 });
+  expect(losOf(plan)).toEqual([1]);
+});
+
+test("a never-scored objective outranks a scored one when overdue and weakness tie", () => {
+  const scored = lo({ loId: 1, scores: [5] }, 2, () => ({ dueOn: TODAY }));
+  const fresh = lo({ loId: 2 }, 2, () => ({ dueOn: TODAY }));
+
+  const plan = select([scored, fresh], { today: TODAY, los: 1, perLo: 1 });
+  expect(losOf(plan)).toEqual([2]);
 });
 
 test("ties break on ids, so the same corpus always gives the same plan", () => {
