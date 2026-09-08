@@ -18,6 +18,25 @@ const PROVENANCE_STYLE: Record<string, string> = {
   supplemental: "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200",
 };
 
+/** The lecturer's cue, when there was one. Neutral concepts carry no badge. */
+const EMPHASIS_BADGE: Record<string, { label: string; style: string }> = {
+  emphasized: {
+    label: "lecturer emphasized",
+    style: "bg-violet-100 text-violet-900 dark:bg-violet-950 dark:text-violet-200",
+  },
+  deemphasized: {
+    label: "lecturer set aside",
+    style: "bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-300",
+  },
+};
+
+type DraftConcept = LectureExtract["concepts"][number];
+
+/** Drafts extracted before emphasis existed carry no cue. */
+function emphasisOf(concept: DraftConcept): string {
+  return concept.emphasis ?? "neutral";
+}
+
 export interface SlideSource {
   text: string;
   /** Which file this slide came from, and its number inside that file. */
@@ -41,6 +60,17 @@ export default function ReviewForm({
       slideRefs: objective.slideRefs,
       kept: true,
     })),
+  );
+  // Which concepts start active, by draft index. A concept the lecturer set
+  // aside starts unticked; unticked concepts are committed suspended, not
+  // dropped, so the LO Map can bring them back.
+  const [ticked, setTicked] = useState<Record<number, boolean>>(() =>
+    Object.fromEntries(
+      draft.concepts.map((concept, index) => [
+        index,
+        emphasisOf(concept) !== "deemphasized",
+      ]),
+    ),
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +101,9 @@ export default function ReviewForm({
           objectives: objectives
             .filter((o) => o.kept && o.text.trim().length > 0)
             .map((o) => ({ draftIndex: o.draftIndex, text: o.text })),
+          concepts: draft.concepts
+            .map((_, index) => index)
+            .filter((index) => ticked[index]),
         }),
       });
       const data = await response.json();
@@ -90,17 +123,21 @@ export default function ReviewForm({
   // -1 collects concepts that name no objective. Draft order within a group
   // is the lecture's order, which is what the numbering means.
   const conceptGroups = (() => {
-    const groups = new Map<number, LectureExtract["concepts"]>();
-    for (const concept of draft.concepts) {
-      const draftIndex = concept.relatedObjectiveIndexes[0] ?? -1;
-      const list = groups.get(draftIndex) ?? [];
-      list.push(concept);
-      groups.set(draftIndex, list);
-    }
+    const groups = new Map<number, { draftIndex: number; concept: DraftConcept }[]>();
+    draft.concepts.forEach((concept, draftIndex) => {
+      const objectiveIndex = concept.relatedObjectiveIndexes[0] ?? -1;
+      const list = groups.get(objectiveIndex) ?? [];
+      list.push({ draftIndex, concept });
+      groups.set(objectiveIndex, list);
+    });
     return [...groups.entries()]
       .sort((a, b) => (a[0] === -1 ? 1 : b[0] === -1 ? -1 : a[0] - b[0]))
       .map(([draftIndex, concepts]) => ({ draftIndex, concepts }));
   })();
+
+  const schedulable = draft.concepts.filter(
+    (concept, index) => concept.relatedObjectiveIndexes.length > 0 && ticked[index],
+  ).length;
 
   // Drafts extracted before Phase 5 carry no practice questions.
   const practiceQuestions = draft.practiceQuestions ?? [];
@@ -182,12 +219,14 @@ export default function ReviewForm({
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-500">
-          Concepts to be scheduled ({draft.concepts.length})
+          Concepts to be scheduled ({schedulable} of {draft.concepts.length})
         </h2>
         <p className="mt-1 text-xs text-stone-500">
           Numbered under the objective each serves, in the order the lecture
           presented them — the numbers a session marks. Anything marked{" "}
-          <em>supplemental</em> is outside the lecture materials.
+          <em>supplemental</em> is outside the lecture materials. An unticked
+          concept keeps its number but starts suspended; the LO Map can bring
+          it back. Concepts the lecturer set aside start unticked.
         </p>
         {conceptGroups.map((group) => (
           <div key={group.draftIndex} className="mt-4">
@@ -200,30 +239,60 @@ export default function ReviewForm({
               </span>
             </h3>
             <ol className="mt-2 grid gap-2 sm:grid-cols-2">
-              {group.concepts.map((concept, index) => (
-                <li
-                  key={index}
-                  className="rounded-md border border-stone-200 p-3 text-sm dark:border-stone-800"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs text-stone-400">{index + 1}.</span>
-                    <span className="font-medium">{concept.label}</span>
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
-                        PROVENANCE_STYLE[concept.provenance] ?? ""
-                      }`}
-                    >
-                      {concept.provenance}
-                    </span>
-                    <span className="text-[10px] uppercase tracking-wide text-stone-400">
-                      {concept.kind}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-stone-600 dark:text-stone-400">
-                    {concept.detail}
-                  </p>
-                </li>
-              ))}
+              {group.concepts.map(({ draftIndex, concept }, index) => {
+                const badge = EMPHASIS_BADGE[emphasisOf(concept)];
+                const active = group.draftIndex !== -1 && ticked[draftIndex];
+                return (
+                  <li
+                    key={draftIndex}
+                    className={`rounded-md border p-3 text-sm ${
+                      active
+                        ? "border-stone-200 dark:border-stone-800"
+                        : "border-stone-200 bg-stone-100 opacity-50 dark:border-stone-800 dark:bg-stone-900"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      {group.draftIndex !== -1 && (
+                        <input
+                          type="checkbox"
+                          checked={ticked[draftIndex]}
+                          onChange={(e) =>
+                            setTicked((prev) => ({ ...prev, [draftIndex]: e.target.checked }))
+                          }
+                          aria-label="Schedule this concept"
+                        />
+                      )}
+                      <span className="font-mono text-xs text-stone-400">{index + 1}.</span>
+                      <span className="font-medium">{concept.label}</span>
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
+                          PROVENANCE_STYLE[concept.provenance] ?? ""
+                        }`}
+                      >
+                        {concept.provenance}
+                      </span>
+                      {badge && (
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${badge.style}`}
+                        >
+                          {badge.label}
+                        </span>
+                      )}
+                      <span className="text-[10px] uppercase tracking-wide text-stone-400">
+                        {concept.kind}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-stone-600 dark:text-stone-400">
+                      {concept.detail}
+                    </p>
+                    {badge && concept.emphasisCue && (
+                      <p className="mt-1 text-xs italic text-stone-500">
+                        “{concept.emphasisCue}”
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
             </ol>
           </div>
         ))}
