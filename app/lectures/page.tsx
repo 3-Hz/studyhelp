@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { StartSessionButton } from "@/app/components/StartSessionButton";
+import { ReviewPicker, type PickableLecture } from "@/app/components/ReviewPicker";
 import { listLectures } from "@/lib/lectures";
 
 export const dynamic = "force-dynamic";
@@ -7,6 +7,14 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const lectures = await listLectures();
   const pending = lectures.filter((l) => !l.committedAt);
+
+  const rows: PickableLecture[] = lectures.map((lecture) => ({
+    id: lecture.id,
+    title: lecture.title,
+    committed: lecture.committedAt !== null,
+    objectiveCount: lecture.objectiveCount,
+    addedOn: lecture.createdAt.toISOString().slice(0, 10),
+  }));
 
   return (
     <div>
@@ -22,6 +30,12 @@ export default async function HomePage() {
         </p>
       ) : (
         <>
+          <p className="mt-1 max-w-xl text-sm text-stone-500">
+            Tick the lectures to review and say how long you have. A review
+            is first-order throughout: recall each objective, then the
+            concepts the recall left short, switching between lectures.
+          </p>
+
           {pending.length > 0 && (
             <p className="mt-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
               {pending.length} lecture{pending.length === 1 ? "" : "s"} awaiting
@@ -29,45 +43,7 @@ export default async function HomePage() {
             </p>
           )}
 
-          <ul className="mt-6 divide-y divide-stone-200 dark:divide-stone-800">
-            {lectures.map((lecture) => (
-              <li
-                key={lecture.id}
-                className="flex items-baseline justify-between gap-4 py-4"
-              >
-                <div>
-                  {lecture.committedAt ? (
-                    <Link
-                      href={`/lectures/${lecture.id}/concepts`}
-                      className="font-medium hover:underline"
-                    >
-                      {lecture.title}
-                    </Link>
-                  ) : (
-                    <Link
-                      href={`/lectures/${lecture.id}/review`}
-                      className="font-medium hover:underline"
-                    >
-                      {lecture.title}
-                    </Link>
-                  )}
-                  <p className="mt-0.5 text-xs text-stone-500">
-                    {lecture.committedAt
-                      ? `${lecture.objectiveCount} objectives on the dashboard`
-                      : "Draft — needs review"}
-                  </p>
-                </div>
-                <div className="flex items-center gap-4">
-                  <span className="text-xs text-stone-400">
-                    {lecture.createdAt.toISOString().slice(0, 10)}
-                  </span>
-                  {lecture.committedAt && (
-                    <StartSessionButton lectureId={lecture.id} />
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <ReviewPicker lectures={rows} />
         </>
       )}
     </div>
