@@ -27,6 +27,18 @@ export interface Score {
   notesFactsFound: string[];
   /** The deck's own practice questions the model recorded, allowing close wording. */
   practiceQuestionsFound: string[];
+  /**
+   * Concepts the lecturer stressed that the model did not mark emphasized:
+   * absent, or present but unmarked. Either way it would not be guaranteed a
+   * place, which is what the cue was for.
+   */
+  emphasisMissed: string[];
+  /**
+   * Concepts the lecturer set aside that the model kept as ordinary. Left out
+   * altogether is not a miss: the student gets the right outcome, only
+   * without the audit trail the prompt asks for.
+   */
+  deemphasisMissed: string[];
   conceptCount: number;
 }
 
@@ -100,6 +112,26 @@ export function scoreExtract(
     return producedQuestions.some((got) => got.includes(key) || key.includes(got));
   });
 
+  const mentioning = (keyword: string) =>
+    extract.concepts.filter((concept) =>
+      `${concept.label} ${concept.detail}`.toLowerCase().includes(keyword.toLowerCase()),
+    );
+
+  const emphasisMissed = truth.emphasized.flatMap((keyword) => {
+    const mentions = mentioning(keyword);
+    if (mentions.some((concept) => concept.emphasis === "emphasized")) return [];
+    return [
+      mentions.length === 0
+        ? `${keyword} — absent`
+        : `${keyword} → "${mentions[0].label}" marked ${mentions[0].emphasis}`,
+    ];
+  });
+
+  const deemphasisMissed = truth.deemphasized.flatMap((keyword) => {
+    const kept = mentioning(keyword).filter((concept) => concept.emphasis !== "deemphasized");
+    return kept.length === 0 ? [] : [`${keyword} → "${kept[0].label}" marked ${kept[0].emphasis}`];
+  });
+
   return {
     exact,
     paraphrased,
@@ -108,6 +140,8 @@ export function scoreExtract(
     provenanceErrors,
     notesFactsFound,
     practiceQuestionsFound,
+    emphasisMissed,
+    deemphasisMissed,
     conceptCount: extract.concepts.length,
   };
 }

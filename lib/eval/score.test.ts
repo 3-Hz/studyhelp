@@ -13,6 +13,8 @@ const truth: GroundTruth = {
   supplementalTraps: ["tafamidis"],
   notesOnlyFacts: ["0.26 to 1.65"],
   practiceQuestions: ["Which stain confirms amyloid on the biopsy?"],
+  emphasized: ["low voltage"],
+  deemphasized: ["V122I"],
 };
 
 function extract(partial: Partial<LectureExtract>): LectureExtract {
@@ -205,4 +207,63 @@ test("duplicate objectives in the output do not inflate the score", () => {
   expect(score.exact).toHaveLength(2);
   expect(verbatimRate(score, truth)).toBe(1);
   expect(score.hallucinated).toHaveLength(0);
+});
+
+function cued(
+  label: string,
+  emphasis: "emphasized" | "neutral" | "deemphasized",
+): LectureExtract["concepts"][number] {
+  return {
+    label,
+    detail: "",
+    kind: "fact",
+    provenance: "taught",
+    emphasis,
+    emphasisCue: emphasis === "neutral" ? "" : "The lecturer said so.",
+    relatedObjectiveIndexes: [],
+  };
+}
+
+test("an emphasized concept the model marked emphasized is not missed", () => {
+  const score = scoreExtract(
+    extract({ concepts: [cued("Low voltage with thick walls", "emphasized")] }),
+    truth,
+  );
+  expect(score.emphasisMissed).toEqual([]);
+});
+
+test("an emphasized concept is missed whether the model left it unmarked or left it out", () => {
+  const unmarked = scoreExtract(
+    extract({ concepts: [cued("Low voltage with thick walls", "neutral")] }),
+    truth,
+  );
+  expect(unmarked.emphasisMissed).toHaveLength(1);
+  expect(unmarked.emphasisMissed[0]).toContain("low voltage");
+  expect(unmarked.emphasisMissed[0]).toContain("neutral");
+
+  const absent = scoreExtract(extract({ concepts: [] }), truth);
+  expect(absent.emphasisMissed).toHaveLength(1);
+  expect(absent.emphasisMissed[0]).toContain("absent");
+});
+
+test("a de-emphasized concept the model kept as ordinary is missed", () => {
+  const score = scoreExtract(
+    extract({ concepts: [cued("V122I variant", "neutral")] }),
+    truth,
+  );
+  expect(score.deemphasisMissed).toHaveLength(1);
+  expect(score.deemphasisMissed[0]).toContain("V122I");
+});
+
+test("a de-emphasized concept marked as such, or left out altogether, is not missed", () => {
+  // Left out is not a miss: the student gets the right outcome, only without
+  // the audit trail the prompt asks for.
+  const flagged = scoreExtract(
+    extract({ concepts: [cued("V122I variant", "deemphasized")] }),
+    truth,
+  );
+  expect(flagged.deemphasisMissed).toEqual([]);
+
+  const absent = scoreExtract(extract({ concepts: [] }), truth);
+  expect(absent.deemphasisMissed).toEqual([]);
 });

@@ -10,10 +10,15 @@
  */
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { extractLecture } from "@/lib/extract";
+import { extractLecture, type TranscriptSection } from "@/lib/extract";
 import { scoreExtract, verbatimRate, type Score } from "@/lib/eval/score";
-import { groundTruth, syntheticDeck } from "@/lib/fixtures/syntheticLecture";
+import {
+  groundTruth,
+  syntheticDeck,
+  syntheticTranscript,
+} from "@/lib/fixtures/syntheticLecture";
 import { parsePptx, type ParsedSlide } from "@/lib/ingest/parsePptx";
+import { chunkTranscript } from "@/lib/ingest/parseTranscript";
 import { describeProfile, profileFor } from "@/lib/llm/config";
 import { resolveModel } from "@/lib/llm/provider";
 import type { EvalProfile } from "../eval.config.example";
@@ -83,6 +88,7 @@ function isRateLimit(error: unknown): boolean {
 async function run(
   entry: EvalProfile,
   slides: ParsedSlide[],
+  transcriptChunks: TranscriptSection[],
 ): Promise<Outcome> {
   const env = { ...process.env, ...entry.env } as Record<
     string,
@@ -104,7 +110,7 @@ async function run(
     try {
       const model = resolveModel(profile);
       result = await extractLecture(
-        { slides, transcriptChunks: [], documentParts: [] },
+        { slides, transcriptChunks, documentParts: [] },
         profile,
         model,
       );
@@ -142,13 +148,19 @@ function pad(text: string, width: number): string {
   return text.length >= width ? text : text + " ".repeat(width - text.length);
 }
 
+/** The lecturer's cues honoured, over those planted. */
+function cuesHonoured(s: Score): string {
+  const planted = groundTruth.emphasized.length + groundTruth.deemphasized.length;
+  return `${planted - s.emphasisMissed.length - s.deemphasisMissed.length}/${planted}`;
+}
+
 function report(outcomes: Outcome[]): void {
   const total = groundTruth.objectives.length;
 
   console.log(
-    `\n${pad("PROFILE", 12)} ${pad("VERBATIM", 10)} ${pad("PARA", 6)} ${pad("MISS", 6)} ${pad("HALLUC", 8)} ${pad("PROV", 6)} ${pad("PATH", 20)} TIME`,
+    `\n${pad("PROFILE", 12)} ${pad("VERBATIM", 10)} ${pad("PARA", 6)} ${pad("MISS", 6)} ${pad("HALLUC", 8)} ${pad("PROV", 6)} ${pad("EMPH", 6)} ${pad("PATH", 20)} TIME`,
   );
-  console.log("─".repeat(92));
+  console.log("─".repeat(99));
 
   for (const outcome of outcomes) {
     if (!outcome.ok || !outcome.score) {
@@ -169,6 +181,7 @@ function report(outcomes: Outcome[]): void {
         `${pad(String(s.missed.length), 6)} ` +
         `${pad(String(s.hallucinated.length), 8)} ` +
         `${pad(String(s.provenanceErrors.length), 6)} ` +
+        `${pad(cuesHonoured(s), 6)} ` +
         `${pad(path, 20)} ` +
         `${((outcome.ms ?? 0) / 1000).toFixed(1)}s`,
     );
@@ -205,6 +218,11 @@ function report(outcomes: Outcome[]): void {
       console.log("   Supplemental content labelled as taught:");
       for (const p of s.provenanceErrors) console.log(`     ${p}`);
     }
+    const cuesMissed = [...s.emphasisMissed, ...s.deemphasisMissed];
+    if (cuesMissed.length > 0) {
+      console.log("   Lecturer's cues not honoured:");
+      for (const c of cuesMissed) console.log(`     ${c}`);
+    }
     console.log(
       `   Concepts: ${s.conceptCount} · notes-only facts found: ` +
         `${s.notesFactsFound.length}/${groundTruth.notesOnlyFacts.length} · practice questions found: ` +
@@ -227,6 +245,7 @@ async function main(): Promise<void> {
   }
 
   let slides: ParsedSlide[];
+  let transcriptChunks: TranscriptSection[] = [];
   if (args.deck) {
     console.log(
       `\n⚠  Using a real deck (${args.deck}).\n` +
@@ -236,8 +255,11 @@ async function main(): Promise<void> {
     slides = parsePptx(await readFile(args.deck));
   } else {
     slides = parsePptx(syntheticDeck());
+    transcriptChunks = chunkTranscript(syntheticTranscript()).map((chunk) => ({
+      text: chunk.text,
+    }));
     console.log(
-      `\nFixture: synthetic lecture, ${slides.length} slides, ` +
+      `\nFixture: synthetic lecture, ${slides.length} slides plus a transcript, ` +
         `${groundTruth.objectives.length} known objectives.`,
     );
   }
@@ -245,7 +267,7 @@ async function main(): Promise<void> {
   const outcomes: Outcome[] = [];
   for (const entry of selected) {
     process.stdout.write(`Running ${entry.name}… `);
-    const outcome = await run(entry, slides);
+    const outcome = await run(entry, slides, transcriptChunks);
     console.log(outcome.ok ? "done" : outcome.rateLimited ? "rate limited" : "failed");
     outcomes.push(outcome);
   }

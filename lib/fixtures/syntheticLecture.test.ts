@@ -4,6 +4,7 @@ import {
   groundTruth,
   syntheticDeck,
   syntheticSlideCount,
+  syntheticTranscript,
 } from "./syntheticLecture";
 
 /**
@@ -132,6 +133,64 @@ test("the deck fits in one call on a long-context model", async () => {
   const { chunkLecture } = await import("@/lib/extract/chunk");
   const chunks = chunkLecture(
     { slides, transcriptChunks: [] },
+    {
+      role: "extract",
+      providerId: "google",
+      modelId: "gemini",
+      contextTokens: 1_000_000,
+      maxOutputTokens: 16_000,
+      supportsFileParts: true,
+      supportsImages: true,
+      structuredOutput: "native",
+    },
+  );
+  expect(chunks).toHaveLength(1);
+});
+
+test("the lecturer's cues are planted in both the notes and the transcript", () => {
+  const transcript = syntheticTranscript().toLowerCase();
+  const materials = `${allText}\n${transcript}`;
+
+  expect(groundTruth.emphasized.length).toBeGreaterThan(0);
+  expect(groundTruth.deemphasized.length).toBeGreaterThan(0);
+  for (const keyword of [...groundTruth.emphasized, ...groundTruth.deemphasized]) {
+    expect(materials).toContain(keyword.toLowerCase());
+  }
+
+  // Both sources carry a cue, so a model that reads only one is caught.
+  const inTranscript = (keyword: string) => transcript.includes(keyword.toLowerCase());
+  const inNotes = (keyword: string) =>
+    slides.some((s) => s.notesText.toLowerCase().includes(keyword.toLowerCase()));
+  expect(groundTruth.emphasized.some(inTranscript)).toBe(true);
+  expect(groundTruth.emphasized.some(inNotes)).toBe(true);
+  expect(groundTruth.deemphasized.some(inTranscript)).toBe(true);
+  expect(groundTruth.deemphasized.some(inNotes)).toBe(true);
+});
+
+test("a set-aside concept is taught material, not a supplemental trap", () => {
+  // De-emphasis and provenance are separate axes; the fixture must not let a
+  // model satisfy one by way of the other.
+  for (const keyword of groundTruth.deemphasized) {
+    expect(groundTruth.supplementalTraps).not.toContain(keyword);
+    expect(allText).toContain(keyword.toLowerCase());
+  }
+});
+
+test("the transcript reads as cleaned captions: lines of speech, no cue scaffolding", () => {
+  const { cleanTranscript } = require("@/lib/ingest/parseTranscript");
+  const transcript = syntheticTranscript();
+  expect(cleanTranscript(transcript)).toBe(transcript.trim());
+  expect(transcript.split("\n").length).toBeGreaterThan(5);
+});
+
+test("the deck and transcript together fit in one call on a long-context model", async () => {
+  const { chunkLecture } = await import("@/lib/extract/chunk");
+  const { chunkTranscript } = await import("@/lib/ingest/parseTranscript");
+  const chunks = chunkLecture(
+    {
+      slides,
+      transcriptChunks: chunkTranscript(syntheticTranscript()).map((c) => ({ text: c.text })),
+    },
     {
       role: "extract",
       providerId: "google",

@@ -37,6 +37,17 @@ export interface GroundTruth {
    * content, and read the notes for the answer.
    */
   practiceQuestions: string[];
+  /**
+   * Concepts the lecturer says must be known, in the notes or the transcript.
+   * A model that honours the cue marks them emphasized.
+   */
+  emphasized: string[];
+  /**
+   * Taught concepts the lecturer says need not be known. A model that honours
+   * the cue marks them deemphasized — and must not reach for "supplemental"
+   * instead, since they are in the materials.
+   */
+  deemphasized: string[];
 }
 
 export const groundTruth: GroundTruth = {
@@ -64,6 +75,10 @@ export const groundTruth: GroundTruth = {
   practiceQuestions: [
     "Which stain confirms amyloid on the biopsy, and what do you see under polarised light?",
   ],
+  // One cue of each kind in the notes and one in the transcript, so a model
+  // that reads only one source is caught.
+  emphasized: ["low voltage", "apple-green birefringence"],
+  deemphasized: ["V122I", "lag phase"],
 };
 
 /**
@@ -97,6 +112,7 @@ function fillerSlides(): SlideSpec[] {
         "The cardiac phenotype is a restrictive cardiomyopathy with preserved ejection fraction. Ventricular walls are thickened, but this is infiltration rather than hypertrophy, and the distinction matters for both diagnosis and treatment.",
         "The classic examination finding is discordance between wall thickness and ECG voltage. In hypertrophic cardiomyopathy, thick walls produce high voltage. In amyloidosis, thick walls with low voltage reflect deposit rather than myocyte mass.",
         "Diastolic dysfunction dominates early. Systolic function is preserved until late, which is why ejection fraction is a poor screening tool here and strain imaging is more sensitive.",
+        "I will ask about this on the exam, so know it cold: thick walls with low voltage means infiltration, not hypertrophy.",
       ],
     ],
     [
@@ -169,6 +185,7 @@ function fillerSlides(): SlideSpec[] {
         "Over a hundred pathogenic transthyretin variants have been described, and the variant strongly influences phenotype. Some produce predominantly neuropathic disease, others predominantly cardiac.",
         "The V122I variant is carried by roughly four percent of people of West African ancestry and is associated with late-onset cardiac disease. It is substantially underdiagnosed.",
         "Inheritance is autosomal dominant with incomplete penetrance, so a negative family history does not exclude a hereditary form and genetic testing is warranted in any confirmed ATTR case.",
+        "You do not need to memorise the V122I variant or its carrier frequency; it will not be examined.",
       ],
     ],
     [
@@ -347,4 +364,24 @@ export function syntheticDeck(): Uint8Array {
 /** Slide count, useful for asserting the parser saw everything. */
 export function syntheticSlideCount(): number {
   return slides().length;
+}
+
+/**
+ * The lecture as spoken, in the shape cleanTranscript leaves behind: lines of
+ * speech, no timestamps. It carries one cue of each kind that the notes do
+ * not, so an extraction has to read the transcript to honour them.
+ */
+export function syntheticTranscript(): string {
+  return [
+    "Right, let's get going. Systemic amyloidosis, ninety minutes, one break.",
+    "The four objectives are on the slide. Everything I ask you later maps onto one of them.",
+    "Start with the fibril itself. Whatever the precursor, you end up with a cross-beta sheet, and that shared structure is the whole reason the stains work.",
+    "Which brings me to Congo red. Under polarised light you get apple-green birefringence, and I really mean this: you will need to know apple-green birefringence. It comes up every single year, and it will come up again.",
+    "The fat pad aspirate is the usual first sample, because it is low risk and you can do it in clinic.",
+    "Now, how the fibril forms. The precursor partly unfolds, exposes hydrophobic surfaces, and self-associates.",
+    "You will see in the notes that this is nucleation dependent, with a lag phase and then rapid elongation, and that seeding abolishes the lag phase. That is lovely biochemistry, and I will not test you on it. Know that deposition accelerates once it starts; the kinetics are just for interest.",
+    "AL versus ATTR next, and this one you do need. AL is a light chain from a plasma cell clone; ATTR is transthyretin, hereditary or wild-type.",
+    "AL takes kidney and heart together. Wild-type ATTR is mostly cardiac, and it is missed constantly in older men.",
+    "We will come back to the free light chain assay after the break, and then the cases.",
+  ].join("\n");
 }
