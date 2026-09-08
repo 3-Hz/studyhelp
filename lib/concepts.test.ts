@@ -174,3 +174,19 @@ test("an uncommitted lecture has no objectives yet", async () => {
 test("an unknown lecture is null", async () => {
   expect(await lectureConcepts(9_999, TODAY)).toBeNull();
 });
+
+test("the LO Map says which concepts are suspended", async () => {
+  const [first, second] = (await lectureConcepts(lectureId, TODAY))!.objectives[0].items;
+  await db
+    .update(schema.reviewItems)
+    .set({ suspended: true })
+    .where(eq(schema.reviewItems.id, second.id));
+
+  const view = await lectureConcepts(lectureId, TODAY);
+  const items = view!.objectives[0].items;
+  expect(items.map((item) => item.suspended)).toEqual([false, true]);
+  // Suspended, not gone: it keeps its number.
+  expect(items[1].id).toBe(second.id);
+  expect(items[1].ordinal).toBe(2);
+  expect(items[0].id).toBe(first.id);
+});

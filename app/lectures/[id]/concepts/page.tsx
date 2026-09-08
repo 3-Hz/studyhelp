@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MARK_LABEL, MARK_STYLE, SUSPENDED_STYLE } from "@/app/components/scores";
+import { SuspendToggle } from "@/app/components/SuspendToggle";
 import { lectureConcepts, type ConceptRow } from "@/lib/concepts";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +44,8 @@ export default async function ConceptsPage({
       <h1 className="text-2xl font-semibold tracking-tight">{view.title}</h1>
       <p className="mt-1 text-sm text-stone-500">
         The LO Map: every concept under each objective, numbered, with where
-        it stands and how it was marked on each day it was tested.
+        it stands and how it was marked on each day it was tested. Suspend a
+        concept to keep its number but leave it out of every session.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-4 text-xs text-stone-600 dark:text-stone-400">
@@ -71,6 +73,8 @@ export default async function ConceptsPage({
             {objective.text}
             <span className="ml-2 text-xs font-normal text-stone-400">
               {objective.items.length} concept{objective.items.length === 1 ? "" : "s"}
+              {suspendedCount(objective.items) > 0 &&
+                ` · ${suspendedCount(objective.items)} suspended`}
               {objective.suspended && " · not in play"}
             </span>
           </h2>
@@ -114,17 +118,43 @@ export default async function ConceptsPage({
   );
 }
 
+function suspendedCount(items: ConceptRow[]): number {
+  return items.filter((item) => item.suspended).length;
+}
+
 function ConceptLine({ item, dates }: { item: ConceptRow; dates: string[] }) {
   return (
-    <tr className="border-t border-stone-200 dark:border-stone-800">
+    <tr
+      className={`border-t border-stone-200 dark:border-stone-800 ${
+        item.suspended ? "text-stone-400 dark:text-stone-600" : ""
+      }`}
+    >
       <td className="px-3 py-2 font-mono text-xs text-stone-400">
+        {item.suspended && (
+          <span
+            title="Suspended — not quizzed until reactivated"
+            className={`mr-1.5 inline-block h-2.5 w-2.5 rounded-sm ${SUSPENDED_STYLE} align-middle`}
+          />
+        )}
         {item.ordinal > 0 ? item.ordinal : "—"}
       </td>
       <td className="px-3 py-2">
-        {item.concept}
-        {item.provenance !== "taught" && (
-          <span className="ml-2 text-xs text-stone-400">{item.provenance}</span>
-        )}
+        <span className="flex items-baseline justify-between gap-3">
+          <span>
+            {item.concept}
+            {item.provenance !== "taught" && (
+              <span className="ml-2 text-xs text-stone-400">{item.provenance}</span>
+            )}
+            {item.suspended && (
+              <span className="ml-2 text-xs text-stone-400">not in play</span>
+            )}
+          </span>
+          <SuspendToggle
+            endpoint={`/api/review-items/${item.id}/suspend`}
+            suspended={item.suspended}
+            subject="concept"
+          />
+        </span>
       </td>
       <td className="px-3 py-2 text-stone-500">{item.kind}</td>
       <td className="px-3 py-2">{item.tier}</td>

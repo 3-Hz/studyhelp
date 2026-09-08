@@ -20,6 +20,8 @@ export interface ConceptRow {
   dueIn: number;
   /** The concept's mark on each date it was tested, keyed by ISO date. */
   marks: Record<string, Mark>;
+  /** Not quizzed until reactivated. Listed all the same: its number is fixed. */
+  suspended: boolean;
 }
 
 export interface ObjectiveConcepts {
@@ -116,6 +118,7 @@ export async function lectureConcepts(
       dueOn: item.dueOn,
       dueIn: daysBetween(today, item.dueOn),
       marks: marksByItem.get(item.id) ?? {},
+      suspended: item.suspended,
     });
     itemsByLo.set(item.loId, rows);
   }

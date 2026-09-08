@@ -120,8 +120,9 @@ export default async function DashboardPage() {
                       {lectureTitleById.get(objective.lectureId)}
                     </Link>
                     <SuspendToggle
-                      objectiveId={objective.id}
+                      endpoint={`/api/objectives/${objective.id}/suspend`}
                       suspended={objective.suspended}
+                      subject="objective"
                     />
                   </span>
                   <span

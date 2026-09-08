@@ -3,12 +3,19 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+/**
+ * Suspend or reactivate one objective or one concept. Both endpoints take the
+ * same `{ suspended }` body, so one control serves the dashboard and the LO Map.
+ */
 export function SuspendToggle({
-  objectiveId,
+  endpoint,
   suspended,
+  subject,
 }: {
-  objectiveId: number;
+  /** The suspend route for this row: /api/objectives/… or /api/review-items/…. */
+  endpoint: string;
   suspended: boolean;
+  subject: "objective" | "concept";
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -18,7 +25,7 @@ export function SuspendToggle({
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(`/api/objectives/${objectiveId}/suspend`, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ suspended: !suspended }),
@@ -41,8 +48,8 @@ export function SuspendToggle({
         disabled={busy}
         title={
           suspended
-            ? "Reactivate: this objective can be quizzed again"
-            : "Suspend: stop quizzing this objective"
+            ? `Reactivate: this ${subject} can be quizzed again`
+            : `Suspend: stop quizzing this ${subject}`
         }
         className="text-[10px] uppercase tracking-wide text-stone-400 underline hover:text-stone-700 disabled:opacity-40 dark:hover:text-stone-200"
       >
