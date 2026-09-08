@@ -13,10 +13,16 @@ export interface ApprovedObjective {
  * Commits reviewed objectives to the dashboard and seeds concept-level review
  * items. Review items are keyed to objectives but live in their own table, so
  * scheduling can be fine-grained without ever adding a dashboard row.
+ *
+ * `keptConcepts` holds the draft indexes of the concepts the reviewer ticked.
+ * Every concept still becomes a review item with its number; an unticked one
+ * starts suspended. Omitted, it means every concept the lecturer did not set
+ * aside — the review screen's own default.
  */
 export async function commitLecture(
   lectureId: number,
   approved: ApprovedObjective[],
+  keptConcepts?: number[],
 ): Promise<{
   objectivesCreated: number;
   reviewItemsCreated: number;
@@ -72,12 +78,21 @@ export async function commitLecture(
   // listed them, which the prompt asks to be the lecture's own order.
   const countByLo = new Map<number, number>();
 
-  for (const concept of draft?.concepts ?? []) {
+  const concepts = draft?.concepts ?? [];
+  const ticked = new Set(
+    keptConcepts ??
+      concepts.flatMap((concept, index) =>
+        // Drafts from before emphasis existed carry no cue: nothing set aside.
+        (concept.emphasis ?? "neutral") === "deemphasized" ? [] : [index],
+      ),
+  );
+
+  concepts.forEach((concept, index) => {
     // Attach to the first surviving objective this concept relates to.
     const loId = survivingObjective(concept.relatedObjectiveIndexes);
 
     // A concept whose objectives were all deleted has nothing to hang from.
-    if (loId === undefined) continue;
+    if (loId === undefined) return;
 
     const ordinal = (countByLo.get(loId) ?? 0) + 1;
     countByLo.set(loId, ordinal);
@@ -88,10 +103,11 @@ export async function commitLecture(
       concept: concept.detail ? `${concept.label} — ${concept.detail}` : concept.label,
       kind: concept.kind,
       provenance: concept.provenance,
+      suspended: !ticked.has(index),
       dueOn: due,
       intervalDays: 0,
     });
-  }
+  });
 
   if (reviewItems.length > 0) {
     await db.insert(schema.reviewItems).values(reviewItems);

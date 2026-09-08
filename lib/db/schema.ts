@@ -11,7 +11,8 @@ import {
  * A concept's mark for a day, per new_prompt.txt "Dashboard": green =
  * correct, yellow = partially correct or a minor error, red = incorrect. The
  * ladder moves on marks. Suspension (prompt.txt's dark green) is not a mark:
- * it is a state on the objective (learningObjectives.suspended).
+ * it is a state on the objective (learningObjectives.suspended) or on the
+ * concept (reviewItems.suspended).
  */
 export const MARKS = ["green", "yellow", "red"] as const;
 export type Mark = (typeof MARKS)[number];
@@ -233,6 +234,14 @@ export const reviewItems = sqliteTable(
      * and lastRating this is the whole mastery state — see tierOf.
      */
     streak: integer("streak").notNull().default(0),
+    /**
+     * Do not quiz this concept until it is reactivated. Set at commit for a
+     * concept left unticked on the review screen, and from the LO Map after.
+     * The row and its number stay, so the LO Map's numbering never shifts.
+     */
+    suspended: integer("suspended", { mode: "boolean" })
+      .notNull()
+      .default(false),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(now),

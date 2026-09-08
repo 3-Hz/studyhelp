@@ -1,0 +1,1 @@
+ALTER TABLE `review_items` ADD `suspended` integer DEFAULT false NOT NULL;

@@ -252,3 +252,111 @@ test("keeps the lecture's practice questions, attached to their objective when i
   expect(congoRed?.slideRefs).toEqual([8]);
   expect(precursor?.loId).toBe(objectives[1].id);
 });
+
+/** A draft with the lecturer's cues on it, as extraction now produces. */
+const cuedDraft = {
+  ...draft,
+  concepts: [
+    {
+      label: "Beta-pleated sheet",
+      detail: "Cross-beta conformation.",
+      kind: "fact" as const,
+      provenance: "taught" as const,
+      emphasis: "neutral" as const,
+      emphasisCue: "",
+      relatedObjectiveIndexes: [0],
+    },
+    {
+      label: "Fibril diameter",
+      detail: "Seven to ten nanometres.",
+      kind: "fact" as const,
+      provenance: "taught" as const,
+      emphasis: "deemphasized" as const,
+      emphasisCue: "You do not need to memorise the diameter.",
+      relatedObjectiveIndexes: [0],
+    },
+    {
+      label: "Congo red",
+      detail: "Apple-green birefringence.",
+      kind: "fact" as const,
+      provenance: "taught" as const,
+      emphasis: "emphasized" as const,
+      emphasisCue: "This comes up every year.",
+      relatedObjectiveIndexes: [0],
+    },
+    {
+      label: "AL vs ATTR precursor",
+      detail: "Light chains versus transthyretin.",
+      kind: "distinction" as const,
+      provenance: "taught" as const,
+      emphasis: "neutral" as const,
+      emphasisCue: "",
+      relatedObjectiveIndexes: [1],
+    },
+  ],
+};
+
+async function seedCuedLecture() {
+  const [lecture] = await db
+    .insert(schema.lectures)
+    .values({ title: "Amyloidosis", draftExtract: cuedDraft })
+    .returning({ id: schema.lectures.id });
+  return lecture.id;
+}
+
+async function itemsUnderFirstObjective(lectureId: number) {
+  const objectives = await db.query.learningObjectives.findMany({
+    where: eq(schema.learningObjectives.lectureId, lectureId),
+  });
+  return db.query.reviewItems.findMany({
+    where: eq(schema.reviewItems.loId, objectives[0].id),
+    orderBy: (items, { asc }) => [asc(items.ordinal)],
+  });
+}
+
+test("a draft from before emphasis existed commits every concept active", async () => {
+  const lectureId = await seedLecture();
+  await commitLecture(lectureId, [
+    { draftIndex: 0, text: draft.learningObjectives[0].text },
+  ]);
+
+  const items = await itemsUnderFirstObjective(lectureId);
+  expect(items).toHaveLength(1);
+  expect(items[0].suspended).toBe(false);
+});
+
+test("a concept the lecturer set aside starts suspended, with its number intact", async () => {
+  const lectureId = await seedCuedLecture();
+  const result = await commitLecture(lectureId, [
+    { draftIndex: 0, text: draft.learningObjectives[0].text },
+  ]);
+
+  // Suspended, not dropped: it keeps its place in the LO Map's numbering.
+  expect(result.reviewItemsCreated).toBe(3);
+  const items = await itemsUnderFirstObjective(lectureId);
+  expect(items.map((item) => [item.ordinal, item.suspended])).toEqual([
+    [1, false],
+    [2, true],
+    [3, false],
+  ]);
+});
+
+test("the reviewer's ticks decide which concepts start suspended", async () => {
+  const lectureId = await seedCuedLecture();
+
+  // Tick only the set-aside concept (1) and one under the rejected objective (3).
+  const result = await commitLecture(
+    lectureId,
+    [{ draftIndex: 0, text: draft.learningObjectives[0].text }],
+    [1, 3],
+  );
+
+  const items = await itemsUnderFirstObjective(lectureId);
+  expect(items.map((item) => [item.ordinal, item.suspended])).toEqual([
+    [1, true],
+    [2, false],
+    [3, true],
+  ]);
+  // A tick cannot resurrect a concept whose objective was rejected.
+  expect(result.reviewItemsCreated).toBe(3);
+});

@@ -14,9 +14,15 @@ export async function POST(
 
     const body = (await request.json()) as {
       objectives?: ApprovedObjective[];
+      /** Draft indexes of the concepts ticked on the review screen. */
+      concepts?: number[];
     };
 
-    const result = await commitLecture(lectureId, body.objectives ?? []);
+    const result = await commitLecture(
+      lectureId,
+      body.objectives ?? [],
+      Array.isArray(body.concepts) ? body.concepts : undefined,
+    );
     return NextResponse.json(result);
   } catch (error) {
     const message =
