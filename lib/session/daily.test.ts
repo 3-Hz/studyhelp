@@ -9,7 +9,7 @@ const { db, schema } = await import("../db");
 const { commitLecture } = await import("../commitLecture");
 const { addDays, todayIso, tierOf } = await import("../schedule");
 const { startDailySession } = await import("./daily");
-const { startSameDaySession } = await import("./sameDay");
+const { startReviewSession } = await import("./review");
 const { currentTurn, finishSession, submitAnswer } = await import("./runner");
 const { FORMAT_FAMILY } = await import("./select");
 const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
@@ -312,23 +312,23 @@ test("finishing writes a debrief onto the session", async () => {
   expect((session!.debrief as { heldUp: string[] }).heldUp).toEqual(["Fibril structure"]);
 });
 
-test("a same-day session and a daily session on one date leave the lowest score", async () => {
+test("a review session and a daily session on one date leave the lowest score", async () => {
   const lectureId = await seedLecture("Tubular disease", 1, "Renal");
   const objective = await db.query.learningObjectives.findFirst({
     where: eq(schema.learningObjectives.lectureId, lectureId),
   });
 
-  const sameDayTutor = stubTutor([2, 5, 5]);
-  const sameDay = await startSameDaySession(lectureId);
-  await playThrough(sameDay, sameDayTutor);
-  await finishSession(sameDay, { deps: sameDayTutor });
+  const reviewTutor = stubTutor([2, 5, 5]);
+  const review = await startReviewSession([lectureId]);
+  await playThrough(review, reviewTutor);
+  await finishSession(review, { deps: reviewTutor });
 
   const dailyTutor = stubTutor(Array(10).fill(5));
   const daily = await startDailySession();
   await playThrough(daily, dailyTutor);
   const dailyResult = await finishSession(daily, { deps: dailyTutor });
 
-  // Precondition, not luck: the same-day session's 2 alone already makes the
+  // Precondition, not luck: the review session's 2 alone already makes the
   // cell below a 2, so without pinning this the test would stay green even
   // if the daily session stopped picking the Tubular objective at all.
   expect(dailyResult.scoreByLo[objective!.id]).toBeDefined();

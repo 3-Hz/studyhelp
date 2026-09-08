@@ -1,6 +1,15 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { readdirSync, readFileSync } from "node:fs";
+import { drizzle } from "drizzle-orm/bun-sqlite";
+import {
+  copyFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { runMigrations } from "./migrate";
 
 /**
  * Migration 0005 backfills review_items.streak from the ladder position of
@@ -276,4 +285,87 @@ test("0007 makes a cell's score required, dropping any cell that never had one",
   expect(() =>
     sqlite.exec("INSERT INTO performances (lo_id, study_date_id) VALUES (1, 3)"),
   ).toThrow();
+});
+
+const RENAME = files.find((file) => file.startsWith("0008_"));
+const BEFORE_RENAME = files.filter((file) => file < "0008_");
+
+test("0008 moves a same-day session's lecture into lecture_ids and calls it a review", () => {
+  expect(RENAME).toBeDefined();
+  const sqlite = new Database(":memory:");
+  for (const file of BEFORE_RENAME) apply(sqlite, file);
+  sqlite.exec("INSERT INTO lectures (title) VALUES ('Amyloidosis')");
+  sqlite.exec("INSERT INTO sessions (type, lecture_id) VALUES ('same_day', 1)");
+  sqlite.exec("INSERT INTO sessions (type) VALUES ('daily')");
+
+  apply(sqlite, RENAME!);
+
+  const rows = sqlite
+    .prepare("SELECT type, lecture_ids FROM sessions ORDER BY id")
+    .all() as { type: string; lecture_ids: string | null }[];
+  expect(rows).toEqual([
+    { type: "review", lecture_ids: "[1]" },
+    { type: "daily", lecture_ids: null },
+  ]);
+
+  const columns = (sqlite.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]).map(
+    (column) => column.name,
+  );
+  expect(columns).not.toContain("lecture_id");
+});
+
+/**
+ * A migrations folder holding only the files up to and including `last`,
+ * with a journal to match, so the real migrator can be stopped partway,
+ * rows seeded, and the rest applied.
+ */
+function folderUpTo(last: string, dir: string): void {
+  mkdirSync(`${dir}/meta`, { recursive: true });
+  const journal = JSON.parse(readFileSync("./drizzle/meta/_journal.json", "utf8")) as {
+    entries: { tag: string }[];
+  };
+  const kept = journal.entries.filter((entry) => entry.tag <= last);
+  writeFileSync(`${dir}/meta/_journal.json`, JSON.stringify({ ...journal, entries: kept }));
+  for (const entry of kept) {
+    copyFileSync(`./drizzle/${entry.tag}.sql`, `${dir}/${entry.tag}.sql`);
+  }
+}
+
+test("the migrator keeps a session's attempts and messages through 0008's table rebuild", () => {
+  const dir = `./.test-migrations-${process.pid}`;
+  const path = `${dir}/rebuild.db`;
+  rmSync(dir, { recursive: true, force: true });
+  folderUpTo("0007_aromatic_captain_midlands", dir);
+
+  const sqlite = new Database(path, { create: true });
+  sqlite.exec("PRAGMA foreign_keys = ON;");
+  const db = drizzle(sqlite);
+
+  try {
+    runMigrations(db, dir);
+    sqlite.exec("INSERT INTO lectures (title) VALUES ('Amyloidosis')");
+    sqlite.exec("INSERT INTO sessions (type, lecture_id) VALUES ('same_day', 1)");
+    sqlite.exec(
+      "INSERT INTO attempts (session_id, stage, format, question) VALUES (1, 'lo_recall', 'free_recall', 'Q?')",
+    );
+    sqlite.exec("INSERT INTO messages (session_id, role, content) VALUES (1, 'user', 'hi')");
+
+    // The remaining migrations, 0008 among them, through the same path
+    // `bun run db:migrate` takes.
+    runMigrations(db, "./drizzle");
+
+    const count = (table: string) =>
+      (sqlite.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
+    expect(count("attempts")).toBe(1);
+    expect(count("messages")).toBe(1);
+    expect(
+      sqlite.prepare("SELECT type, lecture_ids FROM sessions").get(),
+    ).toEqual({ type: "review", lecture_ids: "[1]" });
+    expect(
+      (sqlite.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number }).foreign_keys,
+    ).toBe(1);
+  } finally {
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

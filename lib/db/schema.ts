@@ -49,8 +49,8 @@ export const REVIEW_KINDS = [
 export type ReviewKind = (typeof REVIEW_KINDS)[number];
 
 /**
- * The same-day review recalls each objective (lo_recall) and then probes the
- * concepts the recall left untested or short (lo_probe), first-order only
+ * The review recalls each objective (lo_recall) and then probes the concepts
+ * the recall left untested or short (lo_probe), first-order only
  * (new_prompt.txt "Review Quiz Session"). Daily practice has one graded
  * stage: its variety comes from the question format, not from a running
  * order. Both close with a reflection — the student's own account of the
@@ -242,10 +242,17 @@ export const reviewItems = sqliteTable(
 
 export const sessions = sqliteTable("sessions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  type: text("type", { enum: ["same_day", "daily"] }).notNull(),
-  lectureId: integer("lecture_id").references(() => lectures.id, {
-    onDelete: "set null",
-  }),
+  /**
+   * A review quizzes the objectives of chosen lectures, first-order only;
+   * daily practice is the repetition quiz across every lecture
+   * (new_prompt.txt "Review Quiz Session", "Repetition Quiz Session").
+   */
+  type: text("type", { enum: ["review", "daily"] }).notNull(),
+  /**
+   * The lectures a review covers, ids ascending. Null for daily practice. A
+   * lecture deleted mid-session simply drops out of the review.
+   */
+  lectureIds: text("lecture_ids", { mode: "json" }).$type<number[]>(),
   /**
    * The daily session's chosen slots, frozen at start. Selection depends on
    * the whole corpus at that moment, so freezing it keeps a reload, a tie

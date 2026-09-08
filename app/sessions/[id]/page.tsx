@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db, schema } from "@/lib/db";
@@ -25,12 +25,17 @@ export default async function SessionPage({
   if (!session) notFound();
 
   let heading = "Daily practice";
-  if (session.lectureId !== null) {
-    const lecture = await db.query.lectures.findFirst({
-      where: eq(schema.lectures.id, session.lectureId),
-    });
-    if (!lecture) notFound();
-    heading = lecture.title;
+  if (session.type === "review") {
+    const ids = session.lectureIds ?? [];
+    const lectures =
+      ids.length === 0
+        ? []
+        : await db.query.lectures.findMany({
+            where: inArray(schema.lectures.id, ids),
+            orderBy: [asc(schema.lectures.id)],
+          });
+    if (lectures.length === 0) notFound();
+    heading = lectures.map((lecture) => lecture.title).join(" · ");
   }
 
   if (session.endedAt) {

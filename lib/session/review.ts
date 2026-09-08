@@ -1,5 +1,6 @@
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
+import { startOfToday } from "@/lib/schedule";
 import type {
   ConceptContext,
   PracticeQuestionContext,
@@ -10,36 +11,61 @@ import type { SessionKind } from "./kind";
 import { planNextTurn, type GradedTurn, type PlannedObjective } from "./plan";
 import { allowedFormats, FORMAT_FAMILY } from "./select";
 
-export async function startSameDaySession(
-  lectureId: number,
-  minutes: number = DEFAULT_MINUTES,
-): Promise<number> {
-  const lecture = await db.query.lectures.findFirst({
-    where: eq(schema.lectures.id, lectureId),
-  });
+/** The chosen lectures as the session row stores them: unique, ascending. */
+function normalise(lectureIds: number[]): number[] {
+  return [...new Set(lectureIds)].sort((a, b) => a - b);
+}
 
-  if (!lecture) throw new Error(`Lecture ${lectureId} not found.`);
-  if (!lecture.committedAt) {
-    throw new Error(
-      "Review the lecture's objectives and commit them before studying it.",
-    );
+function sameSet(a: number[], b: number[]): boolean {
+  const left = normalise(a);
+  const right = normalise(b);
+  return left.length === right.length && left.every((id, i) => id === right[i]);
+}
+
+/**
+ * A review of one or more lectures, chosen ad hoc (new_prompt.txt "Review
+ * Quiz Session"): every id must name a committed lecture.
+ */
+export async function startReviewSession(
+  lectureIds: number[],
+  minutes: number = DEFAULT_MINUTES,
+  now: Date = new Date(),
+): Promise<number> {
+  const chosen = normalise(lectureIds);
+  if (chosen.length === 0) throw new Error("Pick at least one lecture to review.");
+
+  const lectures = await db.query.lectures.findMany({
+    where: inArray(schema.lectures.id, chosen),
+  });
+  const byId = new Map(lectures.map((lecture) => [lecture.id, lecture]));
+  for (const id of chosen) {
+    const lecture = byId.get(id);
+    if (!lecture) throw new Error(`Lecture ${id} not found.`);
+    if (!lecture.committedAt) {
+      throw new Error(
+        `Review the objectives of "${lecture.title}" and commit them before studying it.`,
+      );
+    }
   }
 
-  // Rejoin an unfinished session rather than starting a parallel one, so a
-  // closed tab does not silently split a sitting across two sessions. A new
-  // budget is ignored on rejoin: the plan runs on the one the session began with.
-  const open = await db.query.sessions.findFirst({
+  // Rejoin an unfinished review of the same lectures started today, so a
+  // closed tab does not split a sitting across two sessions. Only today's,
+  // as for daily practice: an older open session stays orphaned rather than
+  // resumed. A new budget is ignored on rejoin: the plan runs on the one the
+  // session began with.
+  const open = await db.query.sessions.findMany({
     where: and(
-      eq(schema.sessions.lectureId, lectureId),
-      eq(schema.sessions.type, "same_day"),
+      eq(schema.sessions.type, "review"),
       isNull(schema.sessions.endedAt),
+      gte(schema.sessions.startedAt, startOfToday(now)),
     ),
   });
-  if (open) return open.id;
+  const same = open.find((session) => sameSet(session.lectureIds ?? [], chosen));
+  if (same) return same.id;
 
   const [created] = await db
     .insert(schema.sessions)
-    .values({ type: "same_day", lectureId, minutes })
+    .values({ type: "review", lectureIds: chosen, minutes })
     .returning({ id: schema.sessions.id });
 
   return created.id;
@@ -48,36 +74,43 @@ export async function startSameDaySession(
 type ReviewItemRow = typeof schema.reviewItems.$inferSelect;
 type ObjectiveRow = typeof schema.learningObjectives.$inferSelect;
 
-export interface SameDayMaterial {
-  lectureTitle: string;
+export interface ReviewMaterial {
+  lectureTitleById: Map<number, string>;
+  /** Every objective of every chosen lecture, by lecture then by position. */
   objectives: ObjectiveRow[];
   /** Each objective's concepts, in numbered order. */
   itemsByLo: Map<number, ReviewItemRow[]>;
-  /** The lecture's own questions, by the objective they serve. */
+  /** The lectures' own questions, by the objective they serve. */
   practiceByLo: Map<number, PracticeQuestionContext[]>;
   /** How many objectives to cover and how many questions each, from the minutes given. */
   budget: { los: number; perLo: number };
 }
 
 /**
- * The same-day review: first-order only (new_prompt.txt "Review Quiz
- * Session"). Each objective in the budget's subset is recalled whole, then
- * probed on the concepts the recall left untested or short.
+ * The review: first-order only (new_prompt.txt "Review Quiz Session"). Each
+ * objective in the budget's subset is recalled whole, then probed on the
+ * concepts the recall left untested or short, with the lectures taking
+ * turns.
  */
-export const sameDayKind: SessionKind<SameDayMaterial> = {
+export const reviewKind: SessionKind<ReviewMaterial> = {
   async loadMaterial(session) {
-    if (session.lectureId === null) {
-      throw new Error("This session is not attached to a lecture.");
+    const chosen = session.lectureIds ?? [];
+    if (chosen.length === 0) {
+      throw new Error("This session is not attached to any lecture.");
     }
 
-    const lecture = await db.query.lectures.findFirst({
-      where: eq(schema.lectures.id, session.lectureId),
+    const lectures = await db.query.lectures.findMany({
+      where: inArray(schema.lectures.id, chosen),
     });
-    if (!lecture) throw new Error("The session's lecture no longer exists.");
+    if (lectures.length === 0) throw new Error("The session's lectures no longer exist.");
+    const lectureIds = lectures.map((lecture) => lecture.id);
 
     const objectives = await db.query.learningObjectives.findMany({
-      where: eq(schema.learningObjectives.lectureId, session.lectureId),
-      orderBy: [asc(schema.learningObjectives.orderIndex)],
+      where: inArray(schema.learningObjectives.lectureId, lectureIds),
+      orderBy: [
+        asc(schema.learningObjectives.lectureId),
+        asc(schema.learningObjectives.orderIndex),
+      ],
     });
 
     const itemsByLo = new Map<number, ReviewItemRow[]>();
@@ -97,7 +130,7 @@ export const sameDayKind: SessionKind<SameDayMaterial> = {
       }
 
       const questions = await db.query.practiceQuestions.findMany({
-        where: eq(schema.practiceQuestions.lectureId, session.lectureId),
+        where: inArray(schema.practiceQuestions.lectureId, lectureIds),
         orderBy: [asc(schema.practiceQuestions.id)],
       });
       for (const question of questions) {
@@ -111,7 +144,13 @@ export const sameDayKind: SessionKind<SameDayMaterial> = {
     const active = objectives.filter((objective) => !objective.suspended).length;
     const { los, perLo } = reviewBudget(session.minutes ?? DEFAULT_MINUTES, active);
 
-    return { lectureTitle: lecture.title, objectives, itemsByLo, practiceByLo, budget: { los, perLo } };
+    return {
+      lectureTitleById: new Map(lectures.map((lecture) => [lecture.id, lecture.title])),
+      objectives,
+      itemsByLo,
+      practiceByLo,
+      budget: { los, perLo },
+    };
   },
 
   planNext(material, attempts) {
@@ -162,8 +201,19 @@ export const sameDayKind: SessionKind<SameDayMaterial> = {
   },
 
   turnContext(turn, material) {
+    // Every graded review turn is about one objective; the reflection never
+    // reaches here. A turn that cannot find its objective means loadMaterial
+    // and planNext have drifted apart, which is a bug to surface.
     const objective = material.objectives.find((o) => o.id === turn.loId);
-    const items = turn.loId === null ? [] : (material.itemsByLo.get(turn.loId) ?? []);
+    if (!objective) {
+      throw new Error(`Review turn has no matching objective for loId ${turn.loId}.`);
+    }
+    const lectureTitle = material.lectureTitleById.get(objective.lectureId);
+    if (!lectureTitle) {
+      throw new Error(`No lecture title found for lecture ${objective.lectureId}.`);
+    }
+
+    const items = material.itemsByLo.get(objective.id) ?? [];
 
     const concepts: ConceptContext[] = items.map((item) => ({
       concept: item.concept,
@@ -180,12 +230,12 @@ export const sameDayKind: SessionKind<SameDayMaterial> = {
 
     return {
       stage: turn.stage,
-      lectureTitle: material.lectureTitle,
-      objective: objective?.text,
+      lectureTitle,
+      objective: objective.text,
       concepts,
       ...(target ? { targetConcept: target.concept } : {}),
-      ...(turn.loId !== null && material.practiceByLo.has(turn.loId)
-        ? { practiceQuestions: material.practiceByLo.get(turn.loId) }
+      ...(material.practiceByLo.has(objective.id)
+        ? { practiceQuestions: material.practiceByLo.get(objective.id) }
         : {}),
     };
   },

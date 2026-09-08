@@ -57,6 +57,13 @@
       "when": 1788813522579,
       "tag": "0007_aromatic_captain_midlands",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788837218220,
+      "tag": "0008_red_killraven",
+      "breakpoints": true
     }
   ]
 }

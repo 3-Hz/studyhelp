@@ -10,7 +10,7 @@ const { commitLecture } = await import("../commitLecture");
 const { addDays, todayIso } = await import("../schedule");
 const { priorAttempts } = await import("./prior");
 const { startDailySession } = await import("./daily");
-const { startSameDaySession } = await import("./sameDay");
+const { startReviewSession } = await import("./review");
 const { currentTurn, finishSession, submitAnswer } = await import("./runner");
 const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
 
@@ -100,7 +100,7 @@ test("an item nobody has attempted carries nothing", async () => {
 test("a same-day recall of the objective is the fallback, marked as such", async () => {
   const tutor = stubTutor([2], ["The precursor protein"]);
   // Two minutes: the recall alone, with no probe to count as a direct attempt.
-  const sessionId = await startSameDaySession(lectureId, 2);
+  const sessionId = await startReviewSession([lectureId], 2);
   await playThrough(sessionId, tutor);
   await finishSession(sessionId, { deps: tutor });
 

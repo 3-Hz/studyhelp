@@ -88,7 +88,7 @@ export default function SessionTurn({
 }: {
   sessionId: number;
   /** Drives copy that must not be fooled by a lecture literally titled "Daily practice". */
-  sessionType: "same_day" | "daily";
+  sessionType: "review" | "daily";
 }) {
   const [turn, setTurn] = useState<Turn | null>(null);
   const [done, setDone] = useState(false);
@@ -209,7 +209,7 @@ export default function SessionTurn({
     return (
       <div className="mt-8">
         <h2 className="text-lg font-medium">
-          {sessionType === "daily" ? "That is today's practice." : "That is the lecture for today."}
+          {sessionType === "daily" ? "That is today's practice." : "That is every objective in this review."}
         </h2>
         <p className="mt-2 max-w-xl text-sm text-stone-600 dark:text-stone-400">
           Finishing records one dashboard cell per objective — the lowest score

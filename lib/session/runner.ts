@@ -31,7 +31,7 @@ import type {
   TurnWhy,
   TutorDeps,
 } from "./kind";
-import { sameDayKind } from "./sameDay";
+import { reviewKind } from "./review";
 
 /**
  * The parts of a session that do not depend on which flavour it is.
@@ -51,8 +51,8 @@ const REAL_TUTOR: TutorDeps = { askQuestion, gradeAnswer, giveHint, summariseSes
  * as one turn, at no model cost.
  */
 export const REFLECTION_QUESTION: Record<SessionRow["type"], string> = {
-  same_day:
-    "Without looking back: what were the key ideas of this lecture, what was the hardest point, what misconception did you correct today, and what are you still unsure of?",
+  review:
+    "Without looking back: what were the key ideas of what you reviewed, what was the hardest point, what misconception did you correct today, and what are you still unsure of?",
   daily:
     "Before the summary: what was the hardest question today, what did you get wrong and what is the correction you would give yourself, and what are you still unsure of?",
 };
@@ -79,11 +79,11 @@ type AnyKind = SessionKind<any>;
 async function kindFor(session: SessionRow): Promise<AnyKind> {
   if (session.type === "daily") {
     // Imported lazily: daily.ts pulls in selection, which nothing needs while
-    // a same-day session is running.
+    // a review is running.
     const { dailyKind } = await import("./daily");
     return dailyKind;
   }
-  return sameDayKind;
+  return reviewKind;
 }
 
 interface Loaded {

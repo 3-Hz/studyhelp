@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { DEFAULT_MINUTES } from "@/lib/session/budget";
 import { startDailySession } from "@/lib/session/daily";
-import { startSameDaySession } from "@/lib/session/sameDay";
+import { startReviewSession } from "@/lib/session/review";
 
 /** The budgets the start buttons offer, and the widest a hand-typed one may be. */
 const MIN_MINUTES = 5;
@@ -10,8 +10,8 @@ const MAX_MINUTES = 180;
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
-      lectureId?: number;
       type?: string;
+      lectureIds?: unknown;
       minutes?: number;
     };
 
@@ -35,13 +35,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ sessionId });
     }
 
-    const lectureId = Number(body.lectureId);
-    if (!Number.isInteger(lectureId)) {
-      return NextResponse.json({ error: "Bad lecture id." }, { status: 400 });
+    if (body.type === "review") {
+      const ids = body.lectureIds;
+      if (
+        !Array.isArray(ids) ||
+        ids.length === 0 ||
+        !ids.every((id) => Number.isInteger(id))
+      ) {
+        return NextResponse.json({ error: "Pick at least one lecture." }, { status: 400 });
+      }
+      const sessionId = await startReviewSession(ids as number[], minutes);
+      return NextResponse.json({ sessionId });
     }
 
-    const sessionId = await startSameDaySession(lectureId, minutes);
-    return NextResponse.json({ sessionId });
+    return NextResponse.json({ error: "Unknown session type." }, { status: 400 });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Could not start the session.";

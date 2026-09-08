@@ -8,15 +8,14 @@
  */
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { runMigrations } from "../lib/db/migrate";
 
 const dbPath = process.env.DATABASE_URL ?? "./studyhelp.db";
 
 const sqlite = new Database(dbPath, { create: true });
 sqlite.exec("PRAGMA journal_mode = WAL;");
-sqlite.exec("PRAGMA foreign_keys = ON;");
 
-migrate(drizzle(sqlite), { migrationsFolder: "./drizzle" });
+runMigrations(drizzle(sqlite));
 sqlite.close();
 
 console.log(`Migrations applied to ${dbPath}`);
