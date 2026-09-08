@@ -39,6 +39,10 @@ export async function dailyCandidates(): Promise<LoCandidate[]> {
 
   const itemsByLo = new Map<number, ItemCandidate[]>();
   for (const item of [...items].sort((a, b) => a.ordinal - b.ordinal || a.id - b.id)) {
+    // A suspended concept is not something the session could ask about, any
+    // more than an uncommitted lecture is; an objective left with no items
+    // drops out through isEligible.
+    if (item.suspended) continue;
     const list = itemsByLo.get(item.loId) ?? [];
     list.push({
       reviewItemId: item.id,

@@ -124,6 +124,9 @@ export const reviewKind: SessionKind<ReviewMaterial> = {
         orderBy: [asc(schema.reviewItems.ordinal), asc(schema.reviewItems.id)],
       });
       for (const item of items) {
+        // Left out of the material altogether: never probed, never in the
+        // numbered list the grader marks, and so never moved by finishing.
+        if (item.suspended) continue;
         const list = itemsByLo.get(item.loId) ?? [];
         list.push(item);
         itemsByLo.set(item.loId, list);

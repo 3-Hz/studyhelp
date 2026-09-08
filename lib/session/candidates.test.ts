@@ -138,3 +138,40 @@ test("a committed lecture contributes one candidate per objective, carrying its 
     ],
   });
 });
+
+test("a suspended concept is not a candidate, and an objective with none left is out of play", async () => {
+  const { isEligible } = await import("./select");
+  const twoConcepts = {
+    ...draft,
+    concepts: [
+      { ...draft.concepts[0] },
+      { ...draft.concepts[0], label: "Fibril diameter", detail: "Seven to ten nanometres." },
+    ],
+  };
+  const [lecture] = await db
+    .insert(schema.lectures)
+    .values({ title: "Two concepts", draftExtract: twoConcepts })
+    .returning({ id: schema.lectures.id });
+  await commitLecture(lecture.id, [{ draftIndex: 0, text: draft.learningObjectives[0].text }]);
+
+  const objective = await db.query.learningObjectives.findFirst({
+    where: eq(schema.learningObjectives.lectureId, lecture.id),
+  });
+  const [first, second] = await db.query.reviewItems.findMany({
+    where: eq(schema.reviewItems.loId, objective!.id),
+    orderBy: [schema.reviewItems.ordinal],
+  });
+
+  const forThisLecture = async () =>
+    (await dailyCandidates()).find((candidate) => candidate.lectureId === lecture.id)!;
+
+  await db.update(schema.reviewItems).set({ suspended: true }).where(eq(schema.reviewItems.id, second.id));
+  let candidate = await forThisLecture();
+  expect(candidate.items.map((item) => item.reviewItemId)).toEqual([first.id]);
+  expect(isEligible(candidate)).toBe(true);
+
+  await db.update(schema.reviewItems).set({ suspended: true }).where(eq(schema.reviewItems.id, first.id));
+  candidate = await forThisLecture();
+  expect(candidate.items).toEqual([]);
+  expect(isEligible(candidate)).toBe(false);
+});

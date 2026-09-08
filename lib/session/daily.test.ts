@@ -436,3 +436,55 @@ test("the feedback explains the turn; the question does not", async () => {
   await playThrough(sessionId, tutor);
   await finishSession(sessionId, { deps: tutor });
 });
+
+test("a suspended sibling is left out of the numbered list the grader marks", async () => {
+  const { dailyKind } = await import("./daily");
+  const amyloidosis = await db.query.lectures.findFirst({
+    where: eq(schema.lectures.title, "Amyloidosis"),
+  });
+  const [objective] = await db.query.learningObjectives.findMany({
+    where: eq(schema.learningObjectives.lectureId, amyloidosis!.id),
+    orderBy: [asc(schema.learningObjectives.orderIndex)],
+  });
+  const [first, second] = await db.query.reviewItems.findMany({
+    where: eq(schema.reviewItems.loId, objective.id),
+    orderBy: [asc(schema.reviewItems.ordinal)],
+  });
+  await db
+    .update(schema.reviewItems)
+    .set({ suspended: true })
+    .where(eq(schema.reviewItems.id, first.id));
+
+  // A plan made before the suspension can still name the item; the material
+  // is what decides what the grader is shown.
+  const [session] = await db
+    .insert(schema.sessions)
+    .values({
+      type: "daily",
+      plan: [
+        {
+          slot: 1,
+          order: "first",
+          tier: tierOf(second),
+          loId: objective.id,
+          reviewItemId: second.id,
+          formatFamily: FORMAT_FAMILY[second.kind],
+        },
+      ],
+    })
+    .returning();
+
+  const material = await dailyKind.loadMaterial(session);
+  const context = dailyKind.turnContext(
+    { stage: "daily", loId: objective.id, reviewItemId: second.id },
+    material,
+  );
+  expect(context.concepts.map((c) => c.ordinal)).toEqual([2, 3]);
+  expect(context.targetConcept).toBe(second.concept);
+
+  await db.delete(schema.sessions).where(eq(schema.sessions.id, session.id));
+  await db
+    .update(schema.reviewItems)
+    .set({ suspended: false })
+    .where(eq(schema.reviewItems.id, first.id));
+});

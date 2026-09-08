@@ -683,3 +683,40 @@ test("a lecture deleted mid-review drops out; the rest carry on", async () => {
   const loIds = new Set(turns.map((turn) => turn.loId).filter((id) => id !== null));
   expect([...loIds].sort()).toEqual(kept.map((o) => o.id).sort());
 });
+
+test("a suspended concept is neither probed nor shown to the grader, and finishing leaves it alone", async () => {
+  const lectureId = await seedCommittedLecture();
+  const [, second] = await objectivesOf(lectureId);
+  const [precursor, tropism] = await itemsOf(second.id);
+  await db
+    .update(schema.reviewItems)
+    .set({ suspended: true })
+    .where(eq(schema.reviewItems.id, tropism.id));
+
+  const sessionId = await startReviewSession([lectureId]);
+  const contexts: Parameters<TutorDeps["askQuestion"]>[0][] = [];
+  const base = stubTutor([]);
+  const tutor: TutorDeps = {
+    ...base,
+    askQuestion: async (context) => {
+      contexts.push(context);
+      return base.askQuestion(context);
+    },
+  };
+  await playThrough(sessionId, tutor);
+
+  const probes = (await turnsOf(sessionId)).filter((turn) => turn.stage === "lo_probe");
+  expect(probes.map((turn) => turn.reviewItemId)).toContain(precursor.id);
+  expect(probes.map((turn) => turn.reviewItemId)).not.toContain(tropism.id);
+
+  // The grader marks by number, so the suspended concept must not be listed.
+  const recall = contexts.find((c) => c.stage === "lo_recall" && c.objective === second.text)!;
+  expect(recall.concepts.map((c) => c.ordinal)).toEqual([1]);
+
+  await finishSession(sessionId, { deps: tutor });
+  const untouched = await db.query.reviewItems.findFirst({
+    where: eq(schema.reviewItems.id, tropism.id),
+  });
+  expect(untouched!.lastRating).toBeNull();
+  expect(untouched!.dueOn).toBe(tropism.dueOn);
+});

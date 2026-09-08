@@ -51,11 +51,12 @@ export default async function PracticePage() {
             </>
           ) : (
             <>
-              Every objective is suspended. Reactivate one on the{" "}
+              Every objective or concept is suspended. Reactivate an objective
+              on the{" "}
               <Link href="/dashboard" className="underline">
                 dashboard
-              </Link>{" "}
-              to practise again.
+              </Link>
+              , or a concept on its lecture&apos;s LO Map, to practise again.
             </>
           )}
         </p>

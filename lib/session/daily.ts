@@ -113,6 +113,10 @@ export const dailyKind: SessionKind<DailyMaterial> = {
 
     const siblingsByLo = new Map<number, ReviewItemRow[]>();
     for (const item of siblings) {
+      // A suspended sibling stays out of the numbered list the grader marks.
+      // A plan frozen before the suspension can still name the item itself;
+      // like an objective suspended mid-session, it is asked that day.
+      if (item.suspended) continue;
       const list = siblingsByLo.get(item.loId) ?? [];
       list.push(item);
       siblingsByLo.set(item.loId, list);
