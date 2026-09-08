@@ -117,11 +117,13 @@ bun run eval --profiles groq,gemini        # a subset
 ```
 
 It uses a **synthetic lecture fixture** (`lib/fixtures/syntheticLecture.ts`) —
-a fabricated deck whose objectives, taught concepts, and deliberately planted
-out-of-scope content are all known. Scoring reports objectives reproduced
-verbatim, objectives that were *paraphrased* (a defect: the dashboard is meant
-to show the course's wording, not the model's), missed, hallucinated, and
-supplemental content wrongly labelled as taught.
+a fabricated deck and transcript whose objectives, taught concepts, planted
+out-of-scope content, and planted lecturer cues are all known. Scoring reports
+objectives reproduced verbatim, objectives that were *paraphrased* (a defect:
+the dashboard is meant to show the course's wording, not the model's), missed,
+hallucinated, supplemental content wrongly labelled as taught, and cues the
+model did not honour (the `EMPH` column): a stressed concept left unmarked or
+out, a set-aside one kept as ordinary.
 
 The eval never writes to the database.
 
@@ -173,6 +175,13 @@ Files API and are read by the model natively. Extraction returns a **draft** —
 nothing reaches the dashboard until you approve it on the review screen, because
 objective wording is preserved verbatim and worth checking.
 
+Extraction also reads the lecturer's cues — "you need to know this", "I won't
+test you on this" — in the transcript and the presenter notes. A concept the
+lecturer stressed is always extracted; one they set aside is extracted, flagged
+with the cue quoted, and starts unticked on the review screen. Every concept has
+a tick box there. An unticked concept is committed suspended: it keeps its number
+on the LO Map, is never quizzed, and can be reactivated from there.
+
 **Phase 2 (review of chosen lectures) is implemented.**
 
 Tick one or more committed lectures on the lecture list, say how long you
@@ -201,7 +210,8 @@ reproducible and explainable afterward. An objective can
 be suspended from the dashboard (dark green: "do not quiz again unless I
 reactivate it"). Suspension is a row state, not a dashboard cell — it drops
 the objective's concepts from the daily pool and from a review's
-plan without claiming the objective was tested that day.
+plan without claiming the objective was tested that day. A single concept can
+be suspended the same way from the LO Map.
 
 **Phase 4 (history-aware scheduling and adaptive difficulty) is implemented.**
 
@@ -223,7 +233,8 @@ which set how many objectives it covers and how many questions each gets.
 Daily questions are first-, second- or third-order by the objective's latest
 score. Concepts are numbered under their objective in the lecture's order,
 and the concept view under each lecture is the LO Map: the numbered concepts,
-their count, and the mark each earned on each date. Extraction records the
+their count, the mark each earned on each date, and a Suspend/Reactivate
+control on each. Extraction records the
 questions a lecture itself poses, with the answers its notes give, and a
 session prefers one when it fits.
 
@@ -250,6 +261,7 @@ not even then.
 app/
   api/lectures/             ingest + commit endpoints
   api/objectives/           suspend/reactivate an objective
+  api/review-items/         suspend/reactivate a concept
   api/sessions/             start, turn, answer, hint, finish
   components/scores.ts      the rubric and the mark colours, shared by every screen
   components/MinutesSelect  the time budget a session starts with
