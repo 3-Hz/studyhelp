@@ -1,7 +1,7 @@
 # Phase 6 — Review chosen lectures ad hoc; rank repetition by the ladder alone
 
 Date: 2026-09-07
-Status: approved, in implementation
+Status: implemented
 
 ## Context
 

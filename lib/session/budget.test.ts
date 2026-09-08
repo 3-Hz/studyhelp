@@ -29,7 +29,7 @@ test("a daily budget covers as many objectives as the questions allow at that de
   expect(dailyBudget(2)).toEqual({ questions: 1, perLo: 1, los: 1 });
 });
 
-test("a same-day budget prefers breadth: every objective once before any twice", () => {
+test("a review budget prefers breadth: every objective once before any twice", () => {
   // Twelve objectives, five questions: five objectives, one question each.
   expect(reviewBudget(10, 12)).toEqual({ questions: 5, perLo: 1, los: 5 });
   // Twelve objectives, fifteen questions: all twelve, one each.
@@ -40,11 +40,11 @@ test("a same-day budget prefers breadth: every objective once before any twice",
   expect(reviewBudget(20, 6)).toEqual({ questions: 10, perLo: 1, los: 6 });
 });
 
-test("a same-day budget never plans more than three questions on one objective", () => {
+test("a review budget never plans more than three questions on one objective", () => {
   expect(reviewBudget(60, 2).perLo).toBe(3);
 });
 
-test("a same-day budget for a lecture with no objectives plans nothing", () => {
+test("a review budget for a lecture with no objectives plans nothing", () => {
   expect(reviewBudget(20, 0)).toEqual({ questions: 10, perLo: 1, los: 0 });
 });
 

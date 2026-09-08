@@ -29,7 +29,7 @@ export interface TurnRef {
 export interface PlannedTurn extends TurnRef {
   /** Formats the model may choose from. Omitted means any. */
   allowedFormats?: QuestionFormat[];
-  /** The item's mastery tier, from the plan. Absent for same-day turns. */
+  /** The item's mastery tier, from the plan. Absent for review turns. */
   tier?: Tier;
   /** How demanding the question should be, from the plan. */
   order?: QuestionOrder;
@@ -72,7 +72,7 @@ export interface TurnWhy {
  * What differs between the two session flavours. The runner owns everything
  * else: resuming a pending question, capping a hinted score, writing the day.
  *
- * `M` is the flavour's material — one lecture for the same-day review, a set
+ * `M` is the flavour's material — the chosen lectures for a review, a set
  * of items across lectures for daily practice.
  */
 export interface SessionKind<M> {

@@ -97,7 +97,7 @@ test("an item nobody has attempted carries nothing", async () => {
   expect((await priorAttempts(0, slots)).size).toBe(0);
 });
 
-test("a same-day recall of the objective is the fallback, marked as such", async () => {
+test("a review recall of the objective is the fallback, marked as such", async () => {
   const tutor = stubTutor([2], ["The precursor protein"]);
   // Two minutes: the recall alone, with no probe to count as a direct attempt.
   const sessionId = await startReviewSession([lectureId], 2);

@@ -1,8 +1,8 @@
 # studyhelp
 
 A local study coach for medical school, built around *Make It Stick* principles:
-same-day lecture review, daily retrieval practice, and a longitudinal Learning
-Objective dashboard.
+first-order review of chosen lectures, daily retrieval practice across all of
+them, and a longitudinal Learning Objective dashboard.
 
 Two prompts govern it. `new_prompt.txt` is the current ChatGPT workflow this
 app replaces: the LO Map, 1–5 scores, a time budget, first- to third-order
@@ -173,13 +173,14 @@ Files API and are read by the model natively. Extraction returns a **draft** —
 nothing reaches the dashboard until you approve it on the review screen, because
 objective wording is preserved verbatim and worth checking.
 
-**Phase 2 (same-day retrieval practice) is implemented.**
+**Phase 2 (review of chosen lectures) is implemented.**
 
-Studying a committed lecture walks its objectives one at a time, first-order
-only: recall each objective from memory, then answer a probe on each concept
-the recall left untested or short. Each answer is scored 1–5 against the
-rubric, with a mark for every concept it tested, the correction and a model
-answer.
+Tick one or more committed lectures on the lecture list, say how long you
+have, and the review walks their objectives one at a time, first-order only,
+switching lectures between objectives: recall each objective from memory,
+then answer a probe on each concept the recall left untested or short. Each
+answer is scored 1–5 against the rubric, with a mark for every concept it
+tested, the correction and a model answer.
 
 The pacing and the bookkeeping are code, not prompt. Asking for a cue caps the
 answer at 4 — correct with help is not independent recall, so the model is not
@@ -191,14 +192,15 @@ the unmarked ones alone.
 
 **Phase 3 (daily sessions interleaved across lectures) is implemented.**
 
-Each day's session covers objectives from every committed lecture — due for
-spaced review first, then weak, then recent, then one from another lecture —
-with one to three questions on each, alternating lectures between objectives
-and never combining them. Selection is a pure function over the candidate
-pool, so a plan is reproducible and explainable afterward. An objective can
+Each day's session covers objectives from every committed lecture — the ones
+whose concepts are most overdue first, a weaker dashboard history breaking
+ties, at most a third from any one lecture — with one to three questions on
+each, alternating lectures between objectives and never combining them.
+Selection is a pure function over the candidate pool, so a plan is
+reproducible and explainable afterward. An objective can
 be suspended from the dashboard (dark green: "do not quiz again unless I
 reactivate it"). Suspension is a row state, not a dashboard cell — it drops
-the objective's concepts from the daily pool and from a same-day session's
+the objective's concepts from the daily pool and from a review's
 plan without claiming the objective was tested that day.
 
 **Phase 4 (history-aware scheduling and adaptive difficulty) is implemented.**
@@ -225,6 +227,16 @@ their count, and the mark each earned on each date. Extraction records the
 questions a lecture itself poses, with the answers its notes give, and a
 session prefers one when it fits.
 
+**Phase 6 (the study workflow as the new prompt describes it) is implemented.**
+
+A review is ad hoc: any set of committed lectures, any day, in one session
+that shares the budget between them and lets the lectures take turns. The
+repetition quiz chooses objectives by one ranking read off the concept
+ladder and the dashboard — most overdue first, weaker history breaking
+ties — in place of the old prompt's due / weak / recent / interleaved
+quotas. The ladder itself stays: item-level expanding intervals are the
+Leitner model *Make It Stick* recommends, and the quotas were not.
+
 ## Data
 
 Everything is local: a SQLite file in the project root, gitignored along with
@@ -241,15 +253,17 @@ app/
   api/sessions/             start, turn, answer, hint, finish
   components/scores.ts      the rubric and the mark colours, shared by every screen
   components/MinutesSelect  the time budget a session starts with
+  components/ReviewPicker   the lecture list with a box per lecture and the start bar
   dashboard/                the LO grid: one 1–5 score per objective per day
   import/                   upload
-  lectures/                 the lecture list
+  lectures/                 the lecture list: tick lectures to review
   lectures/[id]/review/     draft review before commit
   lectures/[id]/concepts/   the LO Map: numbered concepts, their state, their marks by date
   practice/                 the daily-practice landing screen
   sessions/[id]/            the study session
 lib/
   db/schema.ts              Drizzle schema
+  db/migrate.ts             the migrator, foreign keys off while a table is rebuilt
   schedule.ts               the ladders, the yellow band, band(), the caps, the order, the tier
   eval/score.ts             scoring an extraction against the answer key
   fixtures/pptxBuilder.ts   minimal OOXML deck builder
@@ -273,10 +287,10 @@ lib/
   tutor/index.ts            asking, grading and cueing
   session/budget.ts         minutes → objectives and questions per objective
   session/kind.ts           the shared session-kind interface
-  session/plan.ts           the same-day session's running order, as a pure function
-  session/sameDay.ts        the same-day session: recall, then probes
+  session/plan.ts           the review's running order across its lectures, as a pure function
+  session/review.ts         the review: recall, then probes, lectures taking turns
   session/candidates.ts     every objective the daily session could cover, with its items
-  session/select.ts         choosing the day's objectives and questions, as a pure function
+  session/select.ts         ranking the day's objectives and choosing their questions, as a pure function
   session/daily.ts          the daily session; interleaved across every lecture
   session/prior.ts          the last graded attempt on each planned item
   session/runner.ts         asking, grading, marking, and advancing either session kind

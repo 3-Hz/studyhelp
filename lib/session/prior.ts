@@ -9,7 +9,7 @@ type AttemptRow = typeof schema.attempts.$inferSelect;
 /**
  * The most recent graded attempt on each planned item, from any session but
  * this one: by review item where the item has been asked directly — a daily
- * turn or a same-day probe — else by objective: a same-day recall, the
+ * turn or a review probe — else by objective: a review recall, the
  * item's first exposure, whose misses are the most relevant thing for its
  * first daily review.
  *

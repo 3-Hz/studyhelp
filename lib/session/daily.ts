@@ -18,7 +18,7 @@ import { allowedFormats, select, type PlannedSlot } from "./select";
  * committed lecture, one to three questions on each, chosen by select() and
  * frozen on the session row.
  *
- * Unlike the same-day review, this tests concepts rather than objectives —
+ * Unlike a review, this tests concepts rather than objectives —
  * one review item per question — so only the item asked moves on the ladder.
  */
 
@@ -175,7 +175,7 @@ export const dailyKind: SessionKind<DailyMaterial> = {
 
   turnContext(turn, material) {
     // Daily practice always targets one review item under one objective —
-    // unlike the same-day flavour, there is no whole-lecture stage with a
+    // unlike the review flavour, there is no whole-lecture stage with a
     // legitimately absent objective. A turn that can't resolve one, or an
     // objective whose lecture title is missing, means loadMaterial and
     // planNext have drifted out of sync; that is a bug to surface, not a

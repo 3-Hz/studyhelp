@@ -352,7 +352,7 @@ export interface SessionResult {
 
 /**
  * What the close-out summary sees: every graded turn with what it missed and
- * got wrong. Kind-agnostic — a same-day session and a daily one are debriefed
+ * got wrong. Kind-agnostic — a review and a daily session are debriefed
  * the same way.
  */
 function debriefRequest(attempts: AttemptRow[]): DebriefRequest {
