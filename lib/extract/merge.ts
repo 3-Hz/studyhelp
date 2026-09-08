@@ -1,4 +1,4 @@
-import type { LectureExtract } from "./schema";
+import type { ConceptEmphasis, LectureExtract } from "./schema";
 
 /**
  * Merges per-chunk extractions into one.
@@ -96,6 +96,7 @@ export function mergeExtracts(parts: LectureExtract[]): LectureExtract {
           ...merged.relatedObjectiveIndexes,
           ...remapped,
         ]).sort((a, b) => a - b);
+        Object.assign(merged, strongerEmphasis(merged, concept));
         continue;
       }
 
@@ -155,6 +156,28 @@ export function mergeExtracts(parts: LectureExtract[]): LectureExtract {
 
 function unique<T>(values: T[]): T[] {
   return [...new Set(values)];
+}
+
+type Concept = LectureExtract["concepts"][number];
+
+/**
+ * Across chunks the lecturer's stronger claim wins, whichever chunk made it.
+ * Emphasized outranks deemphasized: wrongly keeping a concept costs a few
+ * questions, wrongly cutting one costs an exam item. Either outranks neutral,
+ * which is only the absence of a cue.
+ */
+const EMPHASIS_RANK: Record<ConceptEmphasis, number> = {
+  neutral: 0,
+  deemphasized: 1,
+  emphasized: 2,
+};
+
+function strongerEmphasis(
+  a: Concept,
+  b: Concept,
+): Pick<Concept, "emphasis" | "emphasisCue"> {
+  const winner = EMPHASIS_RANK[b.emphasis] > EMPHASIS_RANK[a.emphasis] ? b : a;
+  return { emphasis: winner.emphasis, emphasisCue: winner.emphasisCue };
 }
 
 /** Dedupes on the normalised key while emitting the original text. */

@@ -1,6 +1,14 @@
 import * as z from "zod";
 
 /**
+ * How the lecturer weighted a concept, read off cues in the transcript and
+ * the presenter notes. A draft-time signal only: it decides whether a concept
+ * starts ticked on the review screen, and is not stored past commit.
+ */
+export const CONCEPT_EMPHASIS = ["emphasized", "neutral", "deemphasized"] as const;
+export type ConceptEmphasis = (typeof CONCEPT_EMPHASIS)[number];
+
+/**
  * The extraction contract. Provider-neutral by construction — it carried over
  * unchanged from the Anthropic-only implementation.
  */
@@ -48,6 +56,19 @@ export const LectureExtract = z.object({
             "taught = stated in the slides or notes; derived = a reasonable " +
               "inference from them; supplemental = outside medical knowledge " +
               "not present in the materials.",
+          ),
+        emphasis: z
+          .enum(CONCEPT_EMPHASIS)
+          .describe(
+            "How the lecturer weighted it: emphasized = they said it must be " +
+              "known or will be examined; deemphasized = they said it need not " +
+              "be known or will not be examined; neutral = no such cue.",
+          ),
+        emphasisCue: z
+          .string()
+          .describe(
+            "The lecturer's words behind the emphasis, quoted closely from the " +
+              "transcript or notes. Empty when neutral.",
           ),
         relatedObjectiveIndexes: z
           .array(z.number())
@@ -119,7 +140,9 @@ Label every concept by provenance, and be strict about it:
 
 Never invent facts. Never attribute supplemental knowledge to the lecture. Where the course material conflicts with general medical knowledge, record it in conflicts rather than silently correcting the lecture.
 
+Lecturers say what matters. In the transcript and the presenter notes, watch for cues such as "you need to know this", "this will be on the exam", "I will ask about this", and the reverse: "you don't need to memorise this", "just for interest", "not examinable", "I won't test you on this". Mark a concept "emphasized" when the lecturer says it must be known and "deemphasized" when they say it need not be, and quote the cue in emphasisCue. Always extract an emphasized concept, even one you would otherwise judge minor. Extract a deemphasized concept too, rather than dropping it, so the student can see what was set aside. A cue applies to what the lecturer was discussing at that moment, not to the lecture as a whole. Everything else is "neutral" with an empty cue. Emphasis is independent of provenance: "not examinable" said of supplemental material sets both.
+
 Presenter notes carry the explanations the slides omit. Weight them accordingly.`;
 
 /** Appended when a lecture is processed in pieces. */
-export const CHUNK_NOTE = `You are seeing ONE SECTION of a longer lecture. Extract only what this section states. Do not speculate about content in other sections, and do not invent objectives to fill gaps.`;
+export const CHUNK_NOTE = `You are seeing ONE SECTION of a longer lecture. Extract only what this section states. Do not speculate about content in other sections, and do not invent objectives to fill gaps. A lecturer's cue about a concept counts as content this section states: extract the concept it refers to with that emphasis, even if the concept is explained more fully in another section.`;

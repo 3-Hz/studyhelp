@@ -143,6 +143,8 @@ test("remaps concept objective indexes onto merged positions", () => {
           detail: "",
           kind: "fact",
           provenance: "taught",
+          emphasis: "neutral",
+          emphasisCue: "",
           relatedObjectiveIndexes: [0],
         },
       ],
@@ -156,6 +158,8 @@ test("remaps concept objective indexes onto merged positions", () => {
           detail: "",
           kind: "mechanism",
           provenance: "taught",
+          emphasis: "neutral",
+          emphasisCue: "",
           relatedObjectiveIndexes: [0],
         },
       ],
@@ -179,6 +183,8 @@ test("merges duplicate concepts and unions their objective links", () => {
           detail: "Stains amyloid.",
           kind: "fact",
           provenance: "taught",
+          emphasis: "neutral",
+          emphasisCue: "",
           relatedObjectiveIndexes: [0],
         },
       ],
@@ -191,6 +197,8 @@ test("merges duplicate concepts and unions their objective links", () => {
           detail: "Apple-green birefringence.",
           kind: "fact",
           provenance: "taught",
+          emphasis: "neutral",
+          emphasisCue: "",
           relatedObjectiveIndexes: [0],
         },
       ],
@@ -211,6 +219,8 @@ test("drops concept links to objectives that were never emitted", () => {
           detail: "",
           kind: "fact",
           provenance: "taught",
+          emphasis: "neutral",
+          emphasisCue: "",
           // Index 7 does not exist — a model hallucinating a reference.
           relatedObjectiveIndexes: [0, 7],
         },
@@ -242,4 +252,99 @@ test("normaliseKey folds case, punctuation, quotes and whitespace", () => {
   expect(normaliseKey("  Describe   the “fibril” structure!  ")).toBe(
     "describe the fibril structure",
   );
+});
+
+/** A concept literal with the fields a merge test rarely cares about filled in. */
+function concept(
+  overrides: Partial<LectureExtract["concepts"][number]> & { label: string },
+): LectureExtract["concepts"][number] {
+  return {
+    detail: "",
+    kind: "fact",
+    provenance: "taught",
+    emphasis: "neutral",
+    emphasisCue: "",
+    relatedObjectiveIndexes: [0],
+    ...overrides,
+  };
+}
+
+test("a cue heard in a later chunk outranks the neutral reading of an earlier one", () => {
+  // Slides are packed before the transcript, so the slide that teaches a
+  // concept and the moment the lecturer waves it off usually land in
+  // different chunks. First-wins would lose the cue.
+  const merged = mergeExtracts([
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [1] }],
+      concepts: [concept({ label: "V122I variant" })],
+    }),
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [1] }],
+      concepts: [
+        concept({
+          label: "v122i variant",
+          emphasis: "deemphasized",
+          emphasisCue: "You do not need to memorise the V122I variant.",
+        }),
+      ],
+    }),
+  ]);
+
+  expect(merged.concepts).toHaveLength(1);
+  expect(merged.concepts[0].emphasis).toBe("deemphasized");
+  expect(merged.concepts[0].emphasisCue).toBe(
+    "You do not need to memorise the V122I variant.",
+  );
+});
+
+test("emphasized outranks deemphasized when chunks disagree", () => {
+  // Wrongly keeping a concept costs a few questions; wrongly cutting one
+  // costs an exam item. The stronger claim wins regardless of chunk order.
+  const merged = mergeExtracts([
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [1] }],
+      concepts: [
+        concept({
+          label: "Apple-green birefringence",
+          emphasis: "deemphasized",
+          emphasisCue: "Just for interest.",
+        }),
+      ],
+    }),
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [1] }],
+      concepts: [
+        concept({
+          label: "Apple-green birefringence",
+          emphasis: "emphasized",
+          emphasisCue: "This comes up every year.",
+        }),
+      ],
+    }),
+  ]);
+
+  expect(merged.concepts[0].emphasis).toBe("emphasized");
+  expect(merged.concepts[0].emphasisCue).toBe("This comes up every year.");
+});
+
+test("a neutral reading in a later chunk leaves an earlier cue in place", () => {
+  const merged = mergeExtracts([
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [1] }],
+      concepts: [
+        concept({
+          label: "Lag phase",
+          emphasis: "deemphasized",
+          emphasisCue: "I won't test you on the kinetics.",
+        }),
+      ],
+    }),
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [1] }],
+      concepts: [concept({ label: "Lag phase" })],
+    }),
+  ]);
+
+  expect(merged.concepts[0].emphasis).toBe("deemphasized");
+  expect(merged.concepts[0].emphasisCue).toBe("I won't test you on the kinetics.");
 });
