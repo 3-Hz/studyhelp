@@ -182,6 +182,16 @@ with the cue quoted, and starts unticked on the review screen. Every concept has
 a tick box there. An unticked concept is committed suspended: it keeps its number
 on the LO Map, is never quizzed, and can be reactivated from there.
 
+The upload takes four kinds of material in their own boxes — the slide deck,
+the lecture transcript, the practice quiz, and additional materials such as
+handouts and figures — and each reaches the model headed by what it is, since a
+quiz PDF and a lecture PDF are the same file type. Every concept a practice
+question tests is extracted under its objective and marked *practice quiz* on
+the review screen and *quiz* on the LO Map, and the tutor is told which
+numbered concept each question tests. Concepts from the additional materials
+are taught material, under the lecturer's cues like anything else; a cue
+still decides whether a quiz-tested concept starts ticked.
+
 **Phase 2 (review of chosen lectures) is implemented.**
 
 Tick one or more committed lectures on the lecture list, say how long you
@@ -265,9 +275,10 @@ app/
   api/sessions/             start, turn, answer, hint, finish
   components/scores.ts      the rubric and the mark colours, shared by every screen
   components/MinutesSelect  the time budget a session starts with
+  components/MaterialInputs the four upload boxes: deck, transcript, quiz, additional
   components/ReviewPicker   the lecture list with a box per lecture and the start bar
   dashboard/                the LO grid: one 1–5 score per objective per day
-  import/                   upload
+  import/                   upload, one box per kind of material
   lectures/                 the lecture list: tick lectures to review
   lectures/[id]/review/     draft review before commit
   lectures/[id]/concepts/   the LO Map: numbered concepts, their state, their marks by date
