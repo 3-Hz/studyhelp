@@ -100,7 +100,7 @@ export const groundTruth: GroundTruth = {
       concept: "lambda",
     },
   ],
-  additionalOnlyConcepts: ["SAP scintigraphy"],
+  additionalOnlyConcepts: ["dFLC"],
 };
 
 /**
@@ -439,13 +439,16 @@ export function syntheticQuizDeck(): Uint8Array {
 
 /**
  * A handout as plain text, uploaded as additional material. It states one
- * thing nothing else does, so a model that reads a handout as course material
- * can be told from one that ignores it or files it as outside knowledge.
+ * thing nothing else does, in service of objective 4, so a model that reads
+ * a handout as course material can be told from one that ignores it or files
+ * it as outside knowledge. It serves an objective on purpose: the prompt
+ * files concepts under the objectives they serve, so a handout fact that
+ * serves none would be dropped by a model doing exactly as asked.
  */
 export function syntheticHandout(): string {
   return [
-    "Further reading: imaging amyloid load.",
-    "SAP scintigraphy uses radiolabelled serum amyloid P component, which binds every type of amyloid deposit, to image whole-body amyloid load. It is offered at only a few national centres.",
-    "Serial SAP scintigraphy is the established way to show regression of deposits over time, and it is used to follow response once the precursor supply has been cut off.",
+    "Further reading: interpreting the serum free light chain assay.",
+    "The difference between the involved and the uninvolved free light chain, the dFLC, is the measure used to define measurable disease: a dFLC of at least 50 mg/L is required before a haematological response can be assessed.",
+    "A normal ratio does not exclude AL amyloidosis when renal impairment raises both light chains, so the absolute dFLC matters more than the ratio alone.",
   ].join("\n");
 }
