@@ -17,6 +17,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No files uploaded." }, { status: 400 });
     }
 
+    // Files arrive in box order, so the first is the deck when one was given.
     const fallbackTitle =
       (form.get("title") as string | null)?.trim() ||
       files[0].filename.replace(/\.[^.]+$/, "");

@@ -2,25 +2,32 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ACCEPT } from "@/lib/ingest/accept";
+import MaterialInputs, {
+  appendMaterials,
+  EMPTY_MATERIALS,
+  materialCount,
+  type Materials,
+} from "@/app/components/MaterialInputs";
 
 export default function NewLecturePage() {
   const router = useRouter();
-  const [files, setFiles] = useState<File[]>([]);
+  const [materials, setMaterials] = useState<Materials>(EMPTY_MATERIALS);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const count = materialCount(materials);
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (files.length === 0) return;
+    if (count === 0) return;
 
     setBusy(true);
     setError(null);
 
     const form = new FormData();
     if (title.trim()) form.set("title", title.trim());
-    for (const file of files) form.append("files", file);
+    appendMaterials(form, materials);
 
     try {
       const response = await fetch("/api/lectures", {
@@ -40,9 +47,10 @@ export default function NewLecturePage() {
     <div className="max-w-2xl">
       <h1 className="text-2xl font-semibold tracking-tight">Add a lecture</h1>
       <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
-        Upload the deck, and anything else you have for the same lecture — the
-        PDF export, the video transcript, figures. Slides and presenter notes
-        are parsed locally; PDFs and images are read by the model directly.
+        Upload the deck, the transcript, the practice quiz and any additional
+        materials for one lecture, each in its own box, so the model knows
+        which file is which. Slides and presenter notes are parsed locally;
+        PDFs and images are read by the model directly.
       </p>
 
       <form onSubmit={submit} className="mt-8 space-y-6">
@@ -63,34 +71,12 @@ export default function NewLecturePage() {
           />
         </div>
 
-        <div>
-          <label
-            htmlFor="files"
-            className="block text-sm font-medium text-stone-700 dark:text-stone-300"
-          >
-            Lecture files
-          </label>
-          <input
-            id="files"
-            type="file"
-            multiple
-            accept={ACCEPT}
-            onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
-            className="mt-2 w-full rounded-md border border-dashed border-stone-300 bg-white px-3 py-6 text-sm file:mr-4 file:rounded file:border-0 file:bg-stone-900 file:px-3 file:py-1.5 file:text-sm file:text-white dark:border-stone-700 dark:bg-stone-900 dark:file:bg-stone-100 dark:file:text-stone-900"
-          />
-          {files.length > 0 && (
-            <ul className="mt-3 space-y-1 text-sm text-stone-600 dark:text-stone-400">
-              {files.map((file, index) => (
-                <li key={`${file.name}-${index}`}>
-                  {file.name}{" "}
-                  <span className="text-stone-400">
-                    ({Math.round(file.size / 1024)} KB)
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <MaterialInputs
+          idPrefix="new"
+          materials={materials}
+          onChange={setMaterials}
+          disabled={busy}
+        />
 
         {error && (
           <p className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
@@ -100,7 +86,7 @@ export default function NewLecturePage() {
 
         <button
           type="submit"
-          disabled={busy || files.length === 0}
+          disabled={busy || count === 0}
           className="rounded-md bg-stone-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40 dark:bg-stone-100 dark:text-stone-900"
         >
           {busy ? "Reading the lecture…" : "Extract objectives"}

@@ -59,8 +59,8 @@ test("two decks share one run of slide numbers without colliding", async () => {
   const lectureId = await newLecture("Two decks");
 
   const result = await storeSources(lectureId, [
-    { filename: "part1.pptx", bytes: deck([["Systole"], ["Diastole"]]) },
-    { filename: "part2.pptx", bytes: deck([["Valves"], ["Murmurs"], ["S3"]]) },
+    { filename: "part1.pptx", role: "deck", bytes: deck([["Systole"], ["Diastole"]]) },
+    { filename: "part2.pptx", role: "deck", bytes: deck([["Valves"], ["Murmurs"], ["S3"]]) },
   ]);
 
   expect(result.stored).toEqual(["part1.pptx", "part2.pptx"]);
@@ -99,8 +99,8 @@ test("two files with the same name are stored side by side", async () => {
   const lectureId = await newLecture("Duplicate names");
 
   await storeSources(lectureId, [
-    { filename: "figure.png", bytes: text("first") },
-    { filename: "figure.png", bytes: text("second") },
+    { filename: "figure.png", role: "additional", bytes: text("first") },
+    { filename: "figure.png", role: "additional", bytes: text("second") },
   ]);
 
   const sources = (await sourcesFor(lectureId)).sort(
@@ -118,8 +118,8 @@ test("a PDF uploaded after a deck does not take a slide's number", async () => {
   const lectureId = await newLecture("Deck and handout");
 
   await storeSources(lectureId, [
-    { filename: "deck.pptx", bytes: deck([["One"], ["Two"], ["Three"]]) },
-    { filename: "handout.pdf", bytes: text("%PDF-1.4 not really a pdf") },
+    { filename: "deck.pptx", role: "deck", bytes: deck([["One"], ["Two"], ["Three"]]) },
+    { filename: "handout.pdf", role: "additional", bytes: text("%PDF-1.4 not really a pdf") },
   ]);
 
   const assets = await assetsFor(lectureId);
@@ -139,8 +139,8 @@ test("transcript chunks are numbered within their own file", async () => {
     Array.from({ length: 45 }, (_, i) => `${marker} line ${i}`).join("\n");
 
   await storeSources(lectureId, [
-    { filename: "part1.vtt", bytes: text(long("a")) },
-    { filename: "part2.vtt", bytes: text(long("b")) },
+    { filename: "part1.vtt", role: "transcript", bytes: text(long("a")) },
+    { filename: "part2.vtt", role: "transcript", bytes: text(long("b")) },
   ]);
 
   const chunks = await assetsFor(lectureId);
@@ -163,8 +163,8 @@ test("an unreadable deck is skipped without discarding the files beside it", asy
   const lectureId = await newLecture("One bad file");
 
   const result = await storeSources(lectureId, [
-    { filename: "broken.pptx", bytes: text("this is not a zip") },
-    { filename: "good.pptx", bytes: deck([["Survives"]]) },
+    { filename: "broken.pptx", role: "deck", bytes: text("this is not a zip") },
+    { filename: "good.pptx", role: "deck", bytes: deck([["Survives"]]) },
   ]);
 
   expect(result.stored).toEqual(["good.pptx"]);
@@ -180,8 +180,8 @@ test("unsupported file types are reported, not stored", async () => {
   const lectureId = await newLecture("Unsupported");
 
   const result = await storeSources(lectureId, [
-    { filename: "notes.docx", bytes: text("x") },
-    { filename: "archive.zip", bytes: text("y") },
+    { filename: "notes.docx", role: "additional", bytes: text("x") },
+    { filename: "archive.zip", role: "additional", bytes: text("y") },
   ]);
 
   expect(result.stored).toEqual([]);
@@ -193,13 +193,13 @@ test("files added later continue the lecture's numbering", async () => {
   const lectureId = await newLecture("Added later");
 
   await storeSources(lectureId, [
-    { filename: "deck.pptx", bytes: deck([["One"], ["Two"]]) },
+    { filename: "deck.pptx", role: "deck", bytes: deck([["One"], ["Two"]]) },
   ]);
 
   // A week later, the video transcript and the second half of the deck.
   await storeSources(lectureId, [
-    { filename: "lecture.vtt", bytes: text("the talk itself") },
-    { filename: "deck-part2.pptx", bytes: deck([["Three"]]) },
+    { filename: "lecture.vtt", role: "transcript", bytes: text("the talk itself") },
+    { filename: "deck-part2.pptx", role: "deck", bytes: deck([["Three"]]) },
   ]);
 
   const sources = (await sourcesFor(lectureId)).sort(
@@ -226,7 +226,7 @@ test("the database refuses two assets at the same position in one file", async (
   const lectureId = await newLecture("Constraint");
 
   await storeSources(lectureId, [
-    { filename: "deck.pptx", bytes: deck([["One"]]) },
+    { filename: "deck.pptx", role: "deck", bytes: deck([["One"]]) },
   ]);
 
   const [slide] = await db
@@ -255,4 +255,22 @@ test("the database refuses two assets at the same position in one file", async (
 
   expect(String(rejected)).toContain("UNIQUE");
 
+});
+
+test("a file keeps the role of the box it was uploaded in", async () => {
+  const lectureId = await newLecture("Roles");
+
+  await storeSources(lectureId, [
+    { filename: "quiz.pptx", role: "quiz", bytes: deck([["Q1"], ["Answers"]]) },
+    { filename: "reading.txt", role: "additional", bytes: text("A handout.") },
+  ]);
+
+  const sources = (await sourcesFor(lectureId)).sort(
+    (a, b) => a.uploadIndex - b.uploadIndex,
+  );
+  // Kind is the format; role is the box. A deck in the quiz box is both.
+  expect(sources.map((s) => [s.filename, s.kind, s.role])).toEqual([
+    ["quiz.pptx", "slide", "quiz"],
+    ["reading.txt", "transcript", "additional"],
+  ]);
 });

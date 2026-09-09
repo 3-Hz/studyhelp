@@ -37,6 +37,7 @@ export default async function ReviewPage({
     id: source.id,
     filename: source.filename,
     kind: source.kind,
+    role: source.role,
     itemCount: assets.filter((asset) => asset.sourceId === source.id).length,
     byteSize: source.byteSize,
   }));

@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { eq, max } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
+import type { SourceRole } from "@/lib/db/schema";
 import { assetKindFor } from "./documents";
 import { parsePptx } from "./parsePptx";
 import { chunkTranscript } from "./parseTranscript";
@@ -17,6 +18,8 @@ export function uploadDir(): string {
 export interface IncomingFile {
   filename: string;
   bytes: Uint8Array;
+  /** Which box it was uploaded in. */
+  role: SourceRole;
 }
 
 /** Nothing in the upload could be used. A user mistake, not a server fault. */
@@ -110,6 +113,7 @@ export async function storeSources(
         lectureId,
         kind,
         filename: file.filename,
+        role: file.role,
         uploadIndex,
         storagePath,
         byteSize: file.bytes.byteLength,

@@ -61,9 +61,9 @@ test("several files rebuild into one ordered, labelled input", async () => {
   const lectureId = await newLecture("Round trip");
 
   await storeSources(lectureId, [
-    { filename: "part1.pptx", bytes: deck([["Systole"], ["Diastole"]]) },
-    { filename: "lecture.vtt", bytes: text("so today we cover the heart") },
-    { filename: "part2.pptx", bytes: deck([["Valves"]]) },
+    { filename: "part1.pptx", role: "deck", bytes: deck([["Systole"], ["Diastole"]]) },
+    { filename: "lecture.vtt", role: "transcript", bytes: text("so today we cover the heart") },
+    { filename: "part2.pptx", role: "deck", bytes: deck([["Valves"]]) },
   ]);
 
   const { input } = await buildExtractInput(lectureId, profile());
@@ -94,8 +94,8 @@ test("transcripts keep their upload order across files", async () => {
     Array.from({ length: 45 }, (_, i) => `${marker} line ${i}`).join("\n");
 
   await storeSources(lectureId, [
-    { filename: "second-half.vtt", bytes: text(long("b")) },
-    { filename: "first-half.vtt", bytes: text(long("a")) },
+    { filename: "second-half.vtt", role: "transcript", bytes: text(long("b")) },
+    { filename: "first-half.vtt", role: "transcript", bytes: text(long("a")) },
   ]);
 
   const { input } = await buildExtractInput(lectureId, profile());
@@ -114,8 +114,8 @@ test("an image is skipped, and says so, when the model has no vision", async () 
   const lectureId = await newLecture("Blind model");
 
   await storeSources(lectureId, [
-    { filename: "deck.pptx", bytes: deck([["One"]]) },
-    { filename: "figure.png", bytes: text("pretend png bytes") },
+    { filename: "deck.pptx", role: "deck", bytes: deck([["One"]]) },
+    { filename: "figure.png", role: "additional", bytes: text("pretend png bytes") },
   ]);
 
   const { input, warnings } = await buildExtractInput(
@@ -134,7 +134,7 @@ test("a vision model gets the image, and it is charged to the budget", async () 
   const lectureId = await newLecture("Seeing model");
 
   await storeSources(lectureId, [
-    { filename: "figure.png", bytes: text("pretend png bytes") },
+    { filename: "figure.png", role: "additional", bytes: text("pretend png bytes") },
   ]);
 
   const { input, warnings } = await buildExtractInput(
@@ -152,7 +152,7 @@ test("a stored file that has gone missing is reported, not silently dropped", as
   const lectureId = await newLecture("Missing file");
 
   await storeSources(lectureId, [
-    { filename: "figure.png", bytes: text("pretend png bytes") },
+    { filename: "figure.png", role: "additional", bytes: text("pretend png bytes") },
   ]);
 
   // The row survives a file that does not — a moved uploads directory, say.
@@ -172,7 +172,7 @@ test("a committed lecture refuses new files", async () => {
   const lectureId = await newLecture("Already committed");
 
   await storeSources(lectureId, [
-    { filename: "deck.pptx", bytes: deck([["One"]]) },
+    { filename: "deck.pptx", role: "deck", bytes: deck([["One"]]) },
   ]);
   await db
     .update(schema.lectures)
@@ -181,7 +181,7 @@ test("a committed lecture refuses new files", async () => {
 
   await expect(
     addSourcesToLecture(lectureId, [
-      { filename: "late.vtt", bytes: text("the transcript, too late") },
+      { filename: "late.vtt", role: "transcript", bytes: text("the transcript, too late") },
     ]),
   ).rejects.toThrow(/already been committed/);
 
