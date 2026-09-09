@@ -65,6 +65,17 @@ export type SessionStage = (typeof SESSION_STAGES)[number];
 export const ASSET_KINDS = ["slide", "transcript", "pdf", "image"] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
 
+/**
+ * What an uploaded file is to the lecture, from the box it was uploaded in:
+ * the deck, the transcript, the practice quiz, or additional material such
+ * as a handout, a reading or a figure. `kind` is the file's format and
+ * decides how it parses; `role` is what it is, and heads it for the model.
+ * "transcript" sits on both axes: a .vtt is transcript-kind, and a PDF
+ * uploaded in the transcript box is transcript-role.
+ */
+export const SOURCE_ROLES = ["deck", "transcript", "quiz", "additional"] as const;
+export type SourceRole = (typeof SOURCE_ROLES)[number];
+
 const now = sql`(unixepoch())`;
 
 export const lectures = sqliteTable("lectures", {
@@ -98,6 +109,8 @@ export const lectureSources = sqliteTable(
       .notNull()
       .references(() => lectures.id, { onDelete: "cascade" }),
     kind: text("kind", { enum: ASSET_KINDS }).notNull(),
+    /** What the file is, from the box it was uploaded in. */
+    role: text("role", { enum: SOURCE_ROLES }).notNull().default("additional"),
     filename: text("filename").notNull(),
     /** 1-based upload order within the lecture. Stable once assigned. */
     uploadIndex: integer("upload_index").notNull(),
@@ -396,6 +409,11 @@ export const practiceQuestions = sqliteTable(
     question: text("question").notNull(),
     answer: text("answer").notNull(),
     slideRefs: text("slide_refs", { mode: "json" }).$type<number[]>(),
+    /**
+     * The review items of the concepts it tests, from the extract's
+     * conceptIndexes. Null on rows from before the link existed.
+     */
+    reviewItemIds: text("review_item_ids", { mode: "json" }).$type<number[]>(),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(now),

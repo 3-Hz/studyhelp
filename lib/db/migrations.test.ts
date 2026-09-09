@@ -369,3 +369,62 @@ test("the migrator keeps a session's attempts and messages through 0008's table 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- 0010: each source says what it is; a practice question names its concepts ---
+
+const ROLES = files.find((file) => file.startsWith("0010_"));
+const BEFORE_ROLES = files.filter((file) => file < "0010_");
+
+function freshBeforeRoles(): Database {
+  const sqlite = new Database(":memory:");
+  for (const file of BEFORE_ROLES) apply(sqlite, file);
+  sqlite.exec("INSERT INTO lectures (title) VALUES ('Amyloidosis')");
+  return sqlite;
+}
+
+test("0010 gives each old source the role its kind implies", () => {
+  expect(ROLES).toBeDefined();
+  const sqlite = freshBeforeRoles();
+  sqlite.exec(
+    "INSERT INTO lecture_sources (lecture_id, kind, filename, upload_index) VALUES " +
+      "(1, 'slide', 'deck.pptx', 1), (1, 'transcript', 'talk.vtt', 2), " +
+      "(1, 'pdf', 'handout.pdf', 3), (1, 'image', 'figure.png', 4)",
+  );
+
+  apply(sqlite, ROLES!);
+
+  const rows = sqlite
+    .prepare("SELECT filename, role FROM lecture_sources ORDER BY upload_index")
+    .all() as { filename: string; role: string }[];
+  expect(rows).toEqual([
+    { filename: "deck.pptx", role: "deck" },
+    { filename: "talk.vtt", role: "transcript" },
+    // A PDF or image from before the boxes existed could have been anything;
+    // "additional" is the only honest label.
+    { filename: "handout.pdf", role: "additional" },
+    { filename: "figure.png", role: "additional" },
+  ]);
+});
+
+test("0010 lets a practice question name its concepts, and leaves old rows unnamed", () => {
+  const sqlite = freshBeforeRoles();
+  sqlite.exec(
+    "INSERT INTO practice_questions (lecture_id, question, answer, slide_refs) " +
+      "VALUES (1, 'Which stain?', 'Congo red', '[]')",
+  );
+
+  apply(sqlite, ROLES!);
+
+  sqlite.exec(
+    "INSERT INTO practice_questions (lecture_id, question, answer, slide_refs, review_item_ids) " +
+      "VALUES (1, 'Which precursor?', 'Transthyretin', '[]', '[3,4]')",
+  );
+
+  const rows = sqlite
+    .prepare("SELECT question, review_item_ids FROM practice_questions ORDER BY id")
+    .all() as { question: string; review_item_ids: string | null }[];
+  expect(rows).toEqual([
+    { question: "Which stain?", review_item_ids: null },
+    { question: "Which precursor?", review_item_ids: "[3,4]" },
+  ]);
+});
