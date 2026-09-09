@@ -2,6 +2,9 @@ import { readFile } from "node:fs/promises";
 import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import type { ExtractInput } from "@/lib/extract";
+import { heading } from "@/lib/extract/chunk";
+import type { SourceRole } from "@/lib/db/schema";
+import { estimateTokens } from "@/lib/llm/tokens";
 import type { ModelProfile } from "@/lib/llm/config";
 import {
   prepareImage,
@@ -43,6 +46,9 @@ export async function buildExtractInput(
 
   const filenameBySource = new Map(sources.map((s) => [s.id, s.filename]));
   const uploadIndexBySource = new Map(sources.map((s) => [s.id, s.uploadIndex]));
+  const roleBySource = new Map(sources.map((s) => [s.id, s.role]));
+  const roleFor = (asset: { sourceId: number | null }, fallback: SourceRole): SourceRole =>
+    (asset.sourceId === null ? undefined : roleBySource.get(asset.sourceId)) ?? fallback;
 
   const slides = assets
     .filter((asset) => asset.kind === "slide")
@@ -54,6 +60,7 @@ export async function buildExtractInput(
       slideText: asset.slideText ?? "",
       notesText: asset.notesText ?? "",
       sourceLabel: sourceLabelFor(asset, filenameBySource),
+      role: roleFor(asset, "deck"),
     }));
 
   const transcriptChunks = assets
@@ -67,6 +74,7 @@ export async function buildExtractInput(
     .map((asset) => ({
       text: asset.slideText ?? "",
       sourceLabel: sourceLabelFor(asset, filenameBySource),
+      role: roleFor(asset, "transcript"),
     }));
 
   const documentParts: ModelFilePart[] = [];
@@ -98,15 +106,36 @@ export async function buildExtractInput(
         ? await preparePdf(bytes, source.filename, profile)
         : prepareImage(bytes, source.filename, profile);
 
-    documentParts.push(...result.parts);
     warnings.push(...result.warnings);
-    documentTokens += result.estimatedTokens;
+    // A document that yielded nothing is not announced: the warning says why.
+    if (result.parts.length > 0) {
+      const text = announce(source.role, source.filename);
+      documentParts.push({ type: "text", text }, ...result.parts);
+      documentTokens += estimateTokens(text) + result.estimatedTokens;
+    }
   }
 
   return {
     input: { slides, transcriptChunks, documentParts, documentTokens },
     warnings,
   };
+}
+
+/**
+ * What a PDF or image is, said before its bytes: the heading chunking gives
+ * a deck, plus what to make of the document. A quiz PDF and a lecture PDF
+ * are the same file type, so this is the only way the model can tell.
+ */
+function announce(role: SourceRole, filename: string): string {
+  const what: Record<SourceRole, string> = {
+    deck: "The document that follows is the lecture's slide deck.",
+    transcript: "The document that follows is the lecture transcript.",
+    quiz:
+      "The document that follows is the practice quiz supplied with this lecture. Its questions are practice questions, and its answer key gives their answers.",
+    additional:
+      "The document that follows is additional course material supplied with this lecture: a handout, a reading or a figure.",
+  };
+  return `${heading(role, filename)}\n\n${what[role]}`;
 }
 
 /** Legacy rows predate `source_id`; fall back to the filename they carry. */

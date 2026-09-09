@@ -176,3 +176,43 @@ test("documents that fill the whole budget say so, not that a slide is too big",
     ),
   ).toThrow(/attached PDFs and images are about 99000 tokens on their own/);
 });
+
+test("each role heads its own run, so the model knows what each document is", () => {
+  const chunks = chunkLecture(
+    {
+      slides: [
+        { ...slide(1, 50), sourceLabel: "lecture.pptx", role: "deck" },
+        { ...slide(2, 50), sourceLabel: "quiz.pptx", role: "quiz" },
+      ],
+      transcriptChunks: [
+        { text: "the talk", sourceLabel: "talk.vtt", role: "transcript" },
+        { text: "a reading", sourceLabel: "handout.txt", role: "additional" },
+      ],
+    },
+    profile(),
+  );
+
+  const combined = chunks.map((c) => c.text).join("\n");
+  expect(combined).toContain("# Slide deck: lecture.pptx (body text and presenter notes)");
+  expect(combined).toContain("# Practice quiz: quiz.pptx (body text and presenter notes)");
+  expect(combined).toContain("# Lecture transcript: talk.vtt");
+  expect(combined).toContain("# Additional course material: handout.txt");
+});
+
+test("a quiz deck and a lecture deck with the same filename stay separate", () => {
+  const chunks = chunkLecture(
+    {
+      slides: [
+        { ...slide(1, 50), sourceLabel: "deck.pptx", role: "deck" },
+        { ...slide(2, 50), sourceLabel: "deck.pptx", role: "quiz" },
+      ],
+      transcriptChunks: [],
+    },
+    profile(),
+  );
+
+  const combined = chunks.map((c) => c.text).join("\n");
+  expect(combined.match(/^# /gm)).toHaveLength(2);
+  expect(combined).toContain("# Slide deck: deck.pptx");
+  expect(combined).toContain("# Practice quiz: deck.pptx");
+});

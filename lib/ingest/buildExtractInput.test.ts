@@ -142,7 +142,12 @@ test("a vision model gets the image, and it is charged to the budget", async () 
     profile({ supportsImages: true }),
   );
 
-  expect(input.documentParts).toHaveLength(1);
+  // Announced first, so the model knows what it is looking at.
+  expect(input.documentParts.map((part) => part.type)).toEqual(["text", "file"]);
+  expect((input.documentParts[0] as { text: string }).text).toMatch(
+    /^# Additional course material: figure\.png/,
+  );
+  expect(input.documentParts).toHaveLength( 2);
   expect(input.documentTokens).toBeGreaterThan(0);
   expect(warnings).toEqual([]);
 
@@ -192,4 +197,44 @@ test("a committed lecture refuses new files", async () => {
     .where(eq(schema.lectureSources.lectureId, lectureId));
   expect(sources.map((s) => s.filename)).toEqual(["deck.pptx"]);
 
+});
+
+test("roles reach the slides and the transcript sections", async () => {
+  const lectureId = await newLecture("Roles");
+
+  await storeSources(lectureId, [
+    { filename: "lecture.pptx", role: "deck", bytes: deck([["One"]]) },
+    { filename: "quiz.pptx", role: "quiz", bytes: deck([["Q1"]]) },
+    { filename: "talk.vtt", role: "transcript", bytes: text("the talk") },
+    { filename: "reading.txt", role: "additional", bytes: text("a reading") },
+  ]);
+
+  const { input } = await buildExtractInput(lectureId, profile());
+
+  expect(input.slides.map((s) => [s.sourceLabel, s.role])).toEqual([
+    ["lecture.pptx", "deck"],
+    ["quiz.pptx", "quiz"],
+  ]);
+  expect(input.transcriptChunks.map((c) => [c.sourceLabel, c.role])).toEqual([
+    ["talk.vtt", "transcript"],
+    ["reading.txt", "additional"],
+  ]);
+});
+
+test("a quiz PDF is announced before its content", async () => {
+  const lectureId = await newLecture("Quiz PDF");
+
+  await storeSources(lectureId, [
+    { filename: "quiz.pdf", role: "quiz", bytes: text("%PDF-1.4 not really a pdf") },
+  ]);
+
+  const { input } = await buildExtractInput(
+    lectureId,
+    profile({ supportsFileParts: true }),
+  );
+
+  expect(input.documentParts.map((part) => part.type)).toEqual(["text", "file"]);
+  const announcement = (input.documentParts[0] as { text: string }).text;
+  expect(announcement).toMatch(/^# Practice quiz: quiz\.pdf/);
+  expect(announcement).toMatch(/answer key/);
 });

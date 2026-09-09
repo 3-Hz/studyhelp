@@ -1,5 +1,6 @@
 import { formatSlideForModel, type ParsedSlide } from "@/lib/ingest/parsePptx";
 import { estimateTokens, inputBudget } from "@/lib/llm/tokens";
+import type { SourceRole } from "@/lib/db/schema";
 import type { ModelProfile } from "@/lib/llm/config";
 
 export interface LectureChunk {
@@ -15,11 +16,15 @@ export interface LectureChunk {
  */
 export interface ExtractSlide extends ParsedSlide {
   sourceLabel?: string;
+  /** Which box the deck came from. Absent means the lecture's own deck. */
+  role?: SourceRole;
 }
 
 export interface TranscriptSection {
   text: string;
   sourceLabel?: string;
+  /** Which box the file came from. Absent means the lecture transcript. */
+  role?: SourceRole;
 }
 
 export interface ChunkInput {
@@ -110,24 +115,35 @@ interface Unit {
   ordinal?: number;
 }
 
+/** The heading each kind of material gets, so the model knows what it is reading. */
+export const ROLE_HEADING: Record<SourceRole, string> = {
+  deck: "Slide deck",
+  transcript: "Lecture transcript",
+  quiz: "Practice quiz",
+  additional: "Additional course material",
+};
+
+export function heading(role: SourceRole, label: string | undefined, suffix = ""): string {
+  return `# ${ROLE_HEADING[role]}${label ? `: ${label}` : ""}${suffix}`;
+}
+
 function buildUnits(input: ChunkInput): Unit[] {
   const units: Unit[] = [];
 
-  // A header per file, so consecutive decks never read as one run of slides.
-  // Slide numbers stay globally unique across them, which is what `slideRefs`
-  // resolves against.
-  let deckLabel: string | undefined;
-  let firstDeck = true;
+  // A header per run of one file in one role, so consecutive decks never
+  // read as one, and a quiz deck never reads as the lecture's. Slide numbers
+  // stay globally unique across them, which is what `slideRefs` resolves
+  // against.
+  let run: string | undefined;
   for (const slide of input.slides) {
-    if (firstDeck || slide.sourceLabel !== deckLabel) {
+    const role = slide.role ?? "deck";
+    const key = `${role}\n${slide.sourceLabel ?? ""}`;
+    if (key !== run) {
       units.push({
         label: "The slide-deck header",
-        text: slide.sourceLabel
-          ? `# Slide deck: ${slide.sourceLabel} (body text and presenter notes)`
-          : "# Slide deck (body text and presenter notes)",
+        text: heading(role, slide.sourceLabel, " (body text and presenter notes)"),
       });
-      deckLabel = slide.sourceLabel;
-      firstDeck = false;
+      run = key;
     }
     units.push({
       label: `Slide ${slide.ordinal}`,
@@ -136,18 +152,16 @@ function buildUnits(input: ChunkInput): Unit[] {
     });
   }
 
-  let transcriptLabel: string | undefined;
-  let firstTranscript = true;
+  run = undefined;
   input.transcriptChunks.forEach((section, i) => {
-    if (firstTranscript || section.sourceLabel !== transcriptLabel) {
+    const role = section.role ?? "transcript";
+    const key = `${role}\n${section.sourceLabel ?? ""}`;
+    if (key !== run) {
       units.push({
         label: "The transcript header",
-        text: section.sourceLabel
-          ? `# Lecture transcript: ${section.sourceLabel}`
-          : "# Lecture transcript",
+        text: heading(role, section.sourceLabel),
       });
-      transcriptLabel = section.sourceLabel;
-      firstTranscript = false;
+      run = key;
     }
     units.push({ label: `Transcript section ${i + 1}`, text: section.text });
   });
