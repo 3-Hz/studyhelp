@@ -30,6 +30,12 @@ const EMPHASIS_BADGE: Record<string, { label: string; style: string }> = {
   },
 };
 
+/** Tested by one of the lecture's own questions: a key concept by construction. */
+const QUIZ_BADGE = {
+  label: "practice quiz",
+  style: "bg-fuchsia-100 text-fuchsia-900 dark:bg-fuchsia-950 dark:text-fuchsia-200",
+};
+
 type DraftConcept = LectureExtract["concepts"][number];
 
 /** Drafts extracted before emphasis existed carry no cue. */
@@ -142,6 +148,18 @@ export default function ReviewForm({
   // Drafts extracted before Phase 5 carry no practice questions.
   const practiceQuestions = draft.practiceQuestions ?? [];
 
+  // Draft concept index -> the questions that test it. Drafts from before
+  // the link existed name none.
+  const questionsByConcept = new Map<number, string[]>();
+  for (const item of practiceQuestions) {
+    for (const index of item.conceptIndexes ?? []) {
+      questionsByConcept.set(index, [
+        ...(questionsByConcept.get(index) ?? []),
+        item.question,
+      ]);
+    }
+  }
+
   return (
     <div className="mt-8 space-y-10">
       <section>
@@ -226,7 +244,9 @@ export default function ReviewForm({
           presented them — the numbers a session marks. Anything marked{" "}
           <em>supplemental</em> is outside the lecture materials. An unticked
           concept keeps its number but starts suspended; the LO Map can bring
-          it back. Concepts the lecturer set aside start unticked.
+          it back. Concepts the lecturer set aside start unticked. A concept one of the
+          lecture's own questions tests is marked <em>practice quiz</em>; it
+          starts ticked unless the lecturer set it aside.
         </p>
         {conceptGroups.map((group) => (
           <div key={group.draftIndex} className="mt-4">
@@ -278,6 +298,14 @@ export default function ReviewForm({
                           {badge.label}
                         </span>
                       )}
+                      {questionsByConcept.has(draftIndex) && (
+                        <span
+                          title={questionsByConcept.get(draftIndex)!.join("\n")}
+                          className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${QUIZ_BADGE.style}`}
+                        >
+                          {QUIZ_BADGE.label}
+                        </span>
+                      )}
                       <span className="text-[10px] uppercase tracking-wide text-stone-400">
                         {concept.kind}
                       </span>
@@ -304,8 +332,8 @@ export default function ReviewForm({
             Practice questions the lecture poses ({practiceQuestions.length})
           </h2>
           <p className="mt-1 text-xs text-stone-500">
-            Kept with the lecture. A session prefers one of these when it fits
-            the concept being tested.
+            Kept with the lecture, each with the concepts it tests. A session
+            prefers one of these when it fits the concept being tested.
           </p>
           <ul className="mt-4 space-y-2">
             {practiceQuestions.map((item, index) => (
@@ -317,6 +345,15 @@ export default function ReviewForm({
                 <p className="mt-1 text-stone-600 dark:text-stone-400">
                   {item.answer || "(no answer given in the materials)"}
                 </p>
+                {(item.conceptIndexes ?? []).length > 0 && (
+                  <p className="mt-1 text-xs text-stone-500">
+                    Tests:{" "}
+                    {(item.conceptIndexes ?? [])
+                      .map((index) => draft.concepts[index]?.label)
+                      .filter(Boolean)
+                      .join(", ")}
+                  </p>
+                )}
                 {item.slideRefs.length > 0 && (
                   <p className="mt-1 text-[10px] uppercase tracking-wide text-stone-400">
                     Slide{item.slideRefs.length > 1 ? "s" : ""} {item.slideRefs.join(", ")}
