@@ -360,3 +360,102 @@ test("the reviewer's ticks decide which concepts start suspended", async () => {
   // A tick cannot resurrect a concept whose objective was rejected.
   expect(result.reviewItemsCreated).toBe(3);
 });
+
+/** A draft whose questions name the concepts they test, as extraction now produces. */
+const linkedDraft = {
+  ...draft,
+  practiceQuestions: [
+    {
+      question: "Which stain confirms amyloid, and what do you see under polarised light?",
+      answer: "Congo red; apple-green birefringence.",
+      slideRefs: [8],
+      relatedObjectiveIndexes: [2],
+      conceptIndexes: [2],
+    },
+    {
+      question: "Name the precursor protein in AL amyloidosis.",
+      answer: "Immunoglobulin light chain.",
+      slideRefs: [5],
+      relatedObjectiveIndexes: [1],
+      conceptIndexes: [1, 3],
+    },
+  ],
+};
+
+async function seedLinkedLecture() {
+  const [lecture] = await db
+    .insert(schema.lectures)
+    .values({ title: "Amyloidosis", draftExtract: linkedDraft })
+    .returning({ id: schema.lectures.id });
+  return lecture.id;
+}
+
+async function questionsOf(lectureId: number) {
+  const questions = await db.query.practiceQuestions.findMany({
+    where: eq(schema.practiceQuestions.lectureId, lectureId),
+  });
+  return {
+    congoRed: questions.find((q) => q.question.startsWith("Which stain"))!,
+    precursor: questions.find((q) => q.question.startsWith("Name the precursor"))!,
+  };
+}
+
+async function itemIdByLabel(lectureId: number, label: string): Promise<number> {
+  const objectives = await db.query.learningObjectives.findMany({
+    where: eq(schema.learningObjectives.lectureId, lectureId),
+  });
+  const items = await db.query.reviewItems.findMany();
+  const loIds = new Set(objectives.map((o) => o.id));
+  return items.find((item) => loIds.has(item.loId) && item.concept.startsWith(label))!.id;
+}
+
+const allObjectives = draft.learningObjectives.map((objective, draftIndex) => ({
+  draftIndex,
+  text: objective.text,
+}));
+
+test("a practice question records the review items of the concepts it tests", async () => {
+  const lectureId = await seedLinkedLecture();
+  await commitLecture(lectureId, allObjectives);
+
+  const { congoRed, precursor } = await questionsOf(lectureId);
+  expect(congoRed.reviewItemIds).toEqual([
+    await itemIdByLabel(lectureId, "Apple-green birefringence"),
+  ]);
+  expect(precursor.reviewItemIds).toEqual([
+    await itemIdByLabel(lectureId, "AL vs ATTR precursor"),
+    await itemIdByLabel(lectureId, "Tafamidis"),
+  ]);
+});
+
+test("a link to a concept under a rejected objective drops, and the question stays", async () => {
+  const lectureId = await seedLinkedLecture();
+  await commitLecture(lectureId, allObjectives.slice(0, 2));
+
+  const { congoRed, precursor } = await questionsOf(lectureId);
+  expect(congoRed.loId).toBeNull();
+  expect(congoRed.reviewItemIds).toEqual([]);
+  expect(precursor.reviewItemIds).toHaveLength(2);
+});
+
+test("an unticked concept stays linked: the row exists, suspended", async () => {
+  const lectureId = await seedLinkedLecture();
+  await commitLecture(lectureId, allObjectives, [1]);
+
+  const { precursor } = await questionsOf(lectureId);
+  const tafamidis = await itemIdByLabel(lectureId, "Tafamidis");
+  expect(precursor.reviewItemIds).toContain(tafamidis);
+  const row = await db.query.reviewItems.findFirst({
+    where: eq(schema.reviewItems.id, tafamidis),
+  });
+  expect(row?.suspended).toBe(true);
+});
+
+test("a draft from before the link existed commits its questions unlinked", async () => {
+  const lectureId = await seedLecture();
+  await commitLecture(lectureId, allObjectives);
+
+  const { congoRed, precursor } = await questionsOf(lectureId);
+  expect(congoRed.reviewItemIds).toBeNull();
+  expect(precursor.reviewItemIds).toBeNull();
+});

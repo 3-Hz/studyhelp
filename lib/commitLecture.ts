@@ -73,6 +73,8 @@ export async function commitLecture(
       .find((id): id is number => id !== undefined);
 
   const reviewItems: (typeof schema.reviewItems.$inferInsert)[] = [];
+  /** The draft concept behind each review item, in insertion order. */
+  const draftIndexOfItem: number[] = [];
   const due = todayIso();
   // Concepts are numbered within their objective in the order the extract
   // listed them, which the prompt asks to be the lecture's own order.
@@ -107,22 +109,44 @@ export async function commitLecture(
       dueOn: due,
       intervalDays: 0,
     });
+    draftIndexOfItem.push(index);
   });
 
-  if (reviewItems.length > 0) {
-    await db.insert(schema.reviewItems).values(reviewItems);
-  }
+  const insertedItems =
+    reviewItems.length > 0
+      ? await db
+          .insert(schema.reviewItems)
+          .values(reviewItems)
+          .returning({ id: schema.reviewItems.id })
+      : [];
+
+  // draft concept index -> review item id, for the questions' links.
+  const reviewItemIdByDraftIndex = new Map(
+    draftIndexOfItem.map((draftIndex, i) => [draftIndex, insertedItems[i].id]),
+  );
 
   // The lecture's own questions stay with the lecture even when the objective
   // they served was rejected: the material asked them, and the tutor can
-  // still prefer them.
-  const practiceRows = (draft?.practiceQuestions ?? []).map((item) => ({
-    lectureId,
-    loId: survivingObjective(item.relatedObjectiveIndexes) ?? null,
-    question: item.question,
-    answer: item.answer,
-    slideRefs: item.slideRefs,
-  }));
+  // still prefer them. A question's links follow its concepts: a concept
+  // whose objective was rejected has no item, so that link drops; an
+  // unticked concept keeps its item, suspended, so that link stays.
+  const practiceRows = (draft?.practiceQuestions ?? []).map((item) => {
+    // Drafts from before the link existed name no concepts.
+    const links = item.conceptIndexes as number[] | undefined;
+    return {
+      lectureId,
+      loId: survivingObjective(item.relatedObjectiveIndexes) ?? null,
+      question: item.question,
+      answer: item.answer,
+      slideRefs: item.slideRefs,
+      reviewItemIds:
+        links === undefined
+          ? null
+          : links
+              .map((i) => reviewItemIdByDraftIndex.get(i))
+              .filter((id): id is number => id !== undefined),
+    };
+  });
 
   if (practiceRows.length > 0) {
     await db.insert(schema.practiceQuestions).values(practiceRows);
