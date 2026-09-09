@@ -22,6 +22,8 @@ export interface ConceptRow {
   marks: Record<string, Mark>;
   /** Not quizzed until reactivated. Listed all the same: its number is fixed. */
   suspended: boolean;
+  /** The lecture's own questions that test it, in the order the lecture posed them. */
+  practiceQuestions: string[];
 }
 
 export interface ObjectiveConcepts {
@@ -92,6 +94,21 @@ export async function lectureConcepts(
         });
   const dateById = new Map(studyDates.map((date) => [date.id, date.date]));
 
+  const questions = await db.query.practiceQuestions.findMany({
+    where: eq(schema.practiceQuestions.lectureId, lectureId),
+    orderBy: [asc(schema.practiceQuestions.id)],
+  });
+  const questionsByItem = new Map<number, string[]>();
+  for (const question of questions) {
+    // Rows from before the link existed name no items.
+    for (const itemId of question.reviewItemIds ?? []) {
+      questionsByItem.set(itemId, [
+        ...(questionsByItem.get(itemId) ?? []),
+        question.question,
+      ]);
+    }
+  }
+
   const marksByItem = new Map<number, Record<string, Mark>>();
   for (const mark of marks) {
     const date = dateById.get(mark.studyDateId);
@@ -119,6 +136,7 @@ export async function lectureConcepts(
       dueIn: daysBetween(today, item.dueOn),
       marks: marksByItem.get(item.id) ?? {},
       suspended: item.suspended,
+      practiceQuestions: questionsByItem.get(item.id) ?? [],
     });
     itemsByLo.set(item.loId, rows);
   }

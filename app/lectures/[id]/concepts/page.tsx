@@ -44,7 +44,9 @@ export default async function ConceptsPage({
       <h1 className="text-2xl font-semibold tracking-tight">{view.title}</h1>
       <p className="mt-1 text-sm text-stone-500">
         The LO Map: every concept under each objective, numbered, with where
-        it stands and how it was marked on each day it was tested. Suspend a
+        it stands and how it was marked on each day it was tested. A concept
+        marked <em>quiz</em> is tested by one of the lecture's own practice
+        questions. Suspend a
         concept to keep its number but leave it out of every session.
       </p>
 
@@ -144,6 +146,14 @@ function ConceptLine({ item, dates }: { item: ConceptRow; dates: string[] }) {
             {item.concept}
             {item.provenance !== "taught" && (
               <span className="ml-2 text-xs text-stone-400">{item.provenance}</span>
+            )}
+            {item.practiceQuestions.length > 0 && (
+              <span
+                title={item.practiceQuestions.join("\n")}
+                className="ml-2 rounded bg-fuchsia-100 px-1 py-0.5 text-[10px] uppercase tracking-wide text-fuchsia-900 dark:bg-fuchsia-950 dark:text-fuchsia-200"
+              >
+                quiz
+              </span>
             )}
             {item.suspended && (
               <span className="ml-2 text-xs text-stone-400">not in play</span>

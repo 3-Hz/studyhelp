@@ -190,3 +190,57 @@ test("the LO Map says which concepts are suspended", async () => {
   expect(items[1].ordinal).toBe(2);
   expect(items[0].id).toBe(first.id);
 });
+
+test("the LO Map says which of the lecture's practice questions test each concept", async () => {
+  const [lecture] = await db
+    .insert(schema.lectures)
+    .values({
+      title: "Linked",
+      draftExtract: {
+        title: "Linked",
+        learningObjectives: [{ text: "Explain Congo red staining.", slideRefs: [7] }],
+        concepts: [
+          {
+            label: "Congo red",
+            detail: "The confirmatory stain.",
+            kind: "fact",
+            provenance: "taught",
+            relatedObjectiveIndexes: [0],
+          },
+          {
+            label: "Apple-green birefringence",
+            detail: "Under polarised light.",
+            kind: "fact",
+            provenance: "taught",
+            relatedObjectiveIndexes: [0],
+          },
+        ],
+        practiceQuestions: [
+          {
+            question: "Which stain confirms amyloid, and what do you see?",
+            answer: "Congo red; apple-green birefringence.",
+            slideRefs: [8],
+            relatedObjectiveIndexes: [0],
+            conceptIndexes: [0, 1],
+          },
+          {
+            question: "What do you see under polarised light?",
+            answer: "Apple-green birefringence.",
+            slideRefs: [8],
+            relatedObjectiveIndexes: [0],
+            conceptIndexes: [1],
+          },
+        ],
+        commonConfusions: [],
+        conflicts: [],
+      },
+    })
+    .returning({ id: schema.lectures.id });
+  await commitLecture(lecture.id, [{ draftIndex: 0, text: "Explain Congo red staining." }]);
+
+  const view = (await lectureConcepts(lecture.id, TODAY))!;
+  expect(view.objectives[0].items.map((item) => item.practiceQuestions)).toEqual([
+    ["Which stain confirms amyloid, and what do you see?"],
+    ["Which stain confirms amyloid, and what do you see?", "What do you see under polarised light?"],
+  ]);
+});
