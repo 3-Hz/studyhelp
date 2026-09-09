@@ -76,7 +76,8 @@ model reads. Otherwise the model would be handed a document headed
 ### 2. The model is told what each document is
 
 - `lib/extract/chunk.ts`: `ExtractSlide` and `TranscriptSection` gain
-  `role: SourceRole`. `buildUnits` heads each run of units from
+  `role?: SourceRole`, defaulting to deck for a slide and transcript for a
+  section, so older callers and the eval's `--deck` path keep working. `buildUnits` heads each run of units from
   `ROLE_HEADING[role]` — "Slide deck", "Lecture transcript", "Practice
   quiz", "Additional course material" — plus the file label, plus
   "(body text and presenter notes)" when the units are slides. The header
@@ -182,13 +183,17 @@ concept cell, `title` listing them.
     tested). Two questions: one tests a taught concept (keyword
     `transthyretin`), one tests a concept found nowhere in the lecture or
     transcript (light-chain isotype, keyword `lambda`).
-  - `syntheticHandout()`: a short reading as plain text with one concept
-    found nowhere else (SAP scintigraphy, keyword `SAP`). It exists to
-    catch the one confusion the naming rule guards against: a model
-    labelling handout content "supplemental".
+  - `syntheticHandout()`: a short reading as plain text with one fact found
+    nowhere else (the dFLC threshold, keyword `dFLC`), in service of
+    objective 4. It catches the confusion the naming rule guards against, a
+    model labelling handout content "supplemental", and it serves an
+    objective on purpose: Gemini dropped an earlier, unrelated fact (SAP
+    scintigraphy) because the prompt files concepts under the objectives
+    they serve, which is the right behaviour.
   - `GroundTruth` gains `quizTested: { question, concept }[]` and
-    `additionalOnlyConcepts: string[]`; the quiz questions also join
-    `practiceQuestions`.
+    `additionalOnlyConcepts: string[]`. The quiz questions stay out of
+    `practiceQuestions`, which the fixture tests hold to questions posed on
+    the deck's own slides with answers in its notes.
 - `lib/eval/score.ts`: `quizConceptsMissed: string[]` — the question not
   found; found but no linked concept mentions the keyword (say whether the
   concept exists unlinked or is absent). `additionalMissed: string[]` — the
@@ -295,3 +300,20 @@ Each is one line or one constant.
 5. Add-files path: on an uncommitted lecture, add a quiz file through the
    quiz box on the review page and confirm the re-extraction carries the
    quiz heading (the draft's practice questions grow).
+
+## Results (2026-09-09)
+
+`bun run eval` on the fixture, both profiles alone (two extractions at once
+time each other out on the local model):
+
+| Profile | Verbatim | Prov | Cues | Quiz links | Handout | Path |
+|---|---|---|---|---|---|---|
+| gemini-3.7-flash | 4/4 | 0 | 3/4 | 2/2 | 1/1 | native, 20 s |
+| qwen3:8b (8k ctx) | 4/4 | 0 | 3/4 | 1/2 | 1/1 | 2 chunks + repair, 168 s |
+
+The cue both miss ("low voltage") predates this branch. The 8B model links
+the quiz question on a taught concept but does not extract the quiz-only
+concept; the frontier model does both. End to end on the dev server with
+qwen3:8b: four files stored with their roles, the model input headed per
+role, three practice questions each linked to concepts, the review screen
+and LO Map badges, and commit writing the review-item links.
