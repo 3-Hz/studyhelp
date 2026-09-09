@@ -77,10 +77,14 @@ export function mergeExtracts(parts: LectureExtract[]): LectureExtract {
   // Concepts: dedupe by label, remapping objective indexes onto merged ones.
   const conceptIndexByKey = new Map<string, number>();
   const concepts: LectureExtract["concepts"] = [];
+  /** Per chunk: local concept index -> merged index, for the questions. */
+  const conceptIndexMaps: Map<number, number>[] = [];
 
   parts.forEach((part, chunkIndex) => {
     const map = indexMaps[chunkIndex];
-    for (const concept of part.concepts) {
+    const conceptMap = new Map<number, number>();
+    conceptIndexMaps.push(conceptMap);
+    part.concepts.forEach((concept, localIndex) => {
       const remapped = unique(
         concept.relatedObjectiveIndexes
           .map((local) => map.get(local))
@@ -92,26 +96,30 @@ export function mergeExtracts(parts: LectureExtract[]): LectureExtract {
 
       if (existing !== undefined) {
         const merged = concepts[existing];
+        conceptMap.set(localIndex, existing);
         merged.relatedObjectiveIndexes = unique([
           ...merged.relatedObjectiveIndexes,
           ...remapped,
         ]).sort((a, b) => a - b);
         Object.assign(merged, strongerEmphasis(merged, concept));
-        continue;
+        return;
       }
 
+      conceptMap.set(localIndex, concepts.length);
       conceptIndexByKey.set(key, concepts.length);
       concepts.push({ ...concept, relatedObjectiveIndexes: remapped });
-    }
+    });
   });
 
   // Practice questions: dedupe on the question — a recap slide repeats it —
-  // keeping the first wording and answer, unioning the rest.
+  // keeping the first wording and answer, unioning the rest. Concept links
+  // follow the concepts onto their merged positions.
   const questionIndexByKey = new Map<string, number>();
   const practiceQuestions: LectureExtract["practiceQuestions"] = [];
 
   parts.forEach((part, chunkIndex) => {
     const map = indexMaps[chunkIndex];
+    const conceptMap = conceptIndexMaps[chunkIndex];
     for (const item of part.practiceQuestions) {
       const key = normaliseKey(item.question);
       if (key.length === 0) continue;
@@ -119,6 +127,11 @@ export function mergeExtracts(parts: LectureExtract[]): LectureExtract {
       const remapped = unique(
         item.relatedObjectiveIndexes
           .map((local) => map.get(local))
+          .filter((i): i is number => i !== undefined),
+      ).sort((a, b) => a - b);
+      const remappedConcepts = unique(
+        item.conceptIndexes
+          .map((local) => conceptMap.get(local))
           .filter((i): i is number => i !== undefined),
       ).sort((a, b) => a - b);
 
@@ -132,6 +145,10 @@ export function mergeExtracts(parts: LectureExtract[]): LectureExtract {
           ...merged.relatedObjectiveIndexes,
           ...remapped,
         ]).sort((a, b) => a - b);
+        merged.conceptIndexes = unique([
+          ...merged.conceptIndexes,
+          ...remappedConcepts,
+        ]).sort((a, b) => a - b);
         continue;
       }
 
@@ -140,6 +157,7 @@ export function mergeExtracts(parts: LectureExtract[]): LectureExtract {
         ...item,
         slideRefs: unique(item.slideRefs).sort((a, b) => a - b),
         relatedObjectiveIndexes: remapped,
+        conceptIndexes: remappedConcepts,
       });
     }
   });

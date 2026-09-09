@@ -24,6 +24,7 @@ test("unions practice questions across chunks, deduped on the question", () => {
           answer: "Congo red.",
           slideRefs: [8],
           relatedObjectiveIndexes: [0],
+          conceptIndexes: [],
         },
       ],
     }),
@@ -36,12 +37,14 @@ test("unions practice questions across chunks, deduped on the question", () => {
           answer: "Congo red, with apple-green birefringence.",
           slideRefs: [20],
           relatedObjectiveIndexes: [0],
+          conceptIndexes: [],
         },
         {
           question: "What is the normal free light chain ratio?",
           answer: "0.26 to 1.65.",
           slideRefs: [21],
           relatedObjectiveIndexes: [0],
+          conceptIndexes: [],
         },
       ],
     }),
@@ -347,4 +350,90 @@ test("a neutral reading in a later chunk leaves an earlier cue in place", () => 
 
   expect(merged.concepts[0].emphasis).toBe("deemphasized");
   expect(merged.concepts[0].emphasisCue).toBe("I won't test you on the kinetics.");
+});
+
+function plainConcept(label: string, objectives: number[]): LectureExtract["concepts"][number] {
+  return {
+    label,
+    detail: "",
+    kind: "fact",
+    provenance: "taught",
+    emphasis: "neutral",
+    emphasisCue: "",
+    relatedObjectiveIndexes: objectives,
+  };
+}
+
+function question(text: string, conceptIndexes: number[]): LectureExtract["practiceQuestions"][number] {
+  return { question: text, answer: "", slideRefs: [], relatedObjectiveIndexes: [0], conceptIndexes };
+}
+
+test("remaps a question's concept indexes onto merged positions", () => {
+  const merged = mergeExtracts([
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [1] }],
+      concepts: [plainConcept("Cross-beta sheet", [0]), plainConcept("Congo red", [0])],
+    }),
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [9] }],
+      concepts: [plainConcept("Transthyretin", [0])],
+      practiceQuestions: [question("Which precursor forms ATTR?", [0])],
+    }),
+  ]);
+
+  // The second chunk's local concept 0 is merged concept 2.
+  expect(merged.concepts.map((c) => c.label)).toEqual([
+    "Cross-beta sheet",
+    "Congo red",
+    "Transthyretin",
+  ]);
+  expect(merged.practiceQuestions[0].conceptIndexes).toEqual([2]);
+});
+
+test("a question keeps its link when its concept was merged into an earlier chunk's", () => {
+  const merged = mergeExtracts([
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [1] }],
+      concepts: [plainConcept("Cross-beta sheet", [0]), plainConcept("Congo red", [0])],
+    }),
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [9] }],
+      concepts: [plainConcept("congo red", [0])],
+      practiceQuestions: [question("Which stain?", [0])],
+    }),
+  ]);
+
+  expect(merged.concepts).toHaveLength(2);
+  expect(merged.practiceQuestions[0].conceptIndexes).toEqual([1]);
+});
+
+test("a duplicate question unions its concept links", () => {
+  const merged = mergeExtracts([
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [1] }],
+      concepts: [plainConcept("Congo red", [0])],
+      practiceQuestions: [question("Which stain, and what do you see?", [0])],
+    }),
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [9] }],
+      concepts: [plainConcept("Apple-green birefringence", [0])],
+      practiceQuestions: [question("Which stain, and what do you see?", [0])],
+    }),
+  ]);
+
+  expect(merged.practiceQuestions).toHaveLength(1);
+  expect(merged.practiceQuestions[0].conceptIndexes).toEqual([0, 1]);
+});
+
+test("a question's link to a concept that was never emitted is dropped", () => {
+  const merged = mergeExtracts([
+    extract({
+      learningObjectives: [{ text: "Objective A", slideRefs: [1] }],
+      concepts: [plainConcept("Congo red", [0])],
+      practiceQuestions: [question("Which stain?", [0, 7])],
+    }),
+    extract({ learningObjectives: [{ text: "Objective B", slideRefs: [2] }] }),
+  ]);
+
+  expect(merged.practiceQuestions[0].conceptIndexes).toEqual([0]);
 });
