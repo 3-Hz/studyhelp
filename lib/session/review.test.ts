@@ -60,6 +60,7 @@ const draft = {
       answer: "Immunoglobulin light chain.",
       slideRefs: [5],
       relatedObjectiveIndexes: [1],
+      conceptIndexes: [1],
     },
   ],
   commonConfusions: [],
@@ -719,4 +720,49 @@ test("a suspended concept is neither probed nor shown to the grader, and finishi
   });
   expect(untouched!.lastRating).toBeNull();
   expect(untouched!.dueOn).toBe(tropism.dueOn);
+});
+
+/** Every ask context the tutor saw while the session was played through. */
+async function contextsSeen(sessionId: number) {
+  const contexts: Parameters<TutorDeps["askQuestion"]>[0][] = [];
+  const base = stubTutor([]);
+  const tutor: TutorDeps = {
+    ...base,
+    askQuestion: async (context) => {
+      contexts.push(context);
+      return base.askQuestion(context);
+    },
+  };
+  await playThrough(sessionId, tutor);
+  return contexts;
+}
+
+test("the review's practice questions carry the numbers of the concepts they test", async () => {
+  const lectureId = await seedCommittedLecture();
+  const [, second] = await objectivesOf(lectureId);
+  const sessionId = await startReviewSession([lectureId]);
+
+  const contexts = await contextsSeen(sessionId);
+
+  const recall = contexts.find((c) => c.stage === "lo_recall" && c.objective === second.text)!;
+  expect(recall.practiceQuestions?.[0].conceptOrdinals).toEqual([1]);
+});
+
+test("a question's link to a suspended concept carries no number", async () => {
+  const lectureId = await seedCommittedLecture();
+  const [, second] = await objectivesOf(lectureId);
+  const items = await db.query.reviewItems.findMany({
+    where: eq(schema.reviewItems.loId, second.id),
+  });
+  const precursor = items.find((item) => item.concept.startsWith("AL vs ATTR precursor"))!;
+  await db
+    .update(schema.reviewItems)
+    .set({ suspended: true })
+    .where(eq(schema.reviewItems.id, precursor.id));
+  const sessionId = await startReviewSession([lectureId]);
+
+  const contexts = await contextsSeen(sessionId);
+
+  const recall = contexts.find((c) => c.stage === "lo_recall" && c.objective === second.text)!;
+  expect(recall.practiceQuestions?.[0].conceptOrdinals).toEqual([]);
 });

@@ -488,3 +488,68 @@ test("a suspended sibling is left out of the numbered list the grader marks", as
     .set({ suspended: false })
     .where(eq(schema.reviewItems.id, first.id));
 });
+
+test("daily practice questions carry the numbers of the concepts they test", async () => {
+  const draft = draftFor("Quizzed", 1);
+  const linked = {
+    ...draft,
+    practiceQuestions: [
+      {
+        question: "What is Quizzed concept 2?",
+        answer: "Detail 2.",
+        slideRefs: [1],
+        relatedObjectiveIndexes: [0],
+        conceptIndexes: [1],
+      },
+    ],
+  };
+  const [lecture] = await db
+    .insert(schema.lectures)
+    .values({ title: "Quizzed", draftExtract: linked })
+    .returning({ id: schema.lectures.id });
+  await commitLecture(lecture.id, [
+    { draftIndex: 0, text: draft.learningObjectives[0].text },
+  ]);
+  const objective = (await db.query.learningObjectives.findFirst({
+    where: eq(schema.learningObjectives.lectureId, lecture.id),
+  }))!;
+  const items = await db.query.reviewItems.findMany({
+    where: eq(schema.reviewItems.loId, objective.id),
+    orderBy: [asc(schema.reviewItems.ordinal)],
+  });
+
+  // A plan built by hand, so selection over the whole test corpus cannot
+  // leave this lecture out.
+  const [session] = await db
+    .insert(schema.sessions)
+    .values({
+      type: "daily",
+      minutes: 10,
+      plan: [
+        {
+          slot: 1,
+          order: "first",
+          tier: "new",
+          loId: objective.id,
+          reviewItemId: items[0].id,
+          formatFamily: ["free_recall"],
+        },
+      ],
+    })
+    .returning({ id: schema.sessions.id });
+
+  const contexts: Parameters<TutorDeps["askQuestion"]>[0][] = [];
+  const base = stubTutor([]);
+  const tutor: TutorDeps = {
+    ...base,
+    askQuestion: async (context) => {
+      contexts.push(context);
+      return base.askQuestion(context);
+    },
+  };
+  await playThrough(session.id, tutor);
+  await finishSession(session.id, { deps: tutor });
+
+  expect(contexts).toHaveLength(1);
+  expect(contexts[0].practiceQuestions?.[0].conceptOrdinals).toEqual([2]);
+});

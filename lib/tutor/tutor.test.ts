@@ -473,3 +473,40 @@ test("the last attempt reaches the prompt, with a steer that depends on order", 
   expect(prompts[1]).toMatch(/different route/i);
   expect(prompts[1]).not.toMatch(/target what was missed/i);
 });
+
+test("a practice question names the numbered concepts it tests, the target's first", async () => {
+  const { prompts } = capture();
+  const model = new MockLanguageModelV4({
+    doGenerate: async (options) => {
+      prompts.push(JSON.stringify(options.prompt));
+      return textResult('{"format":"short_answer","question":"Which stain?"}');
+    },
+  });
+
+  await askQuestion(
+    {
+      ...context,
+      concepts: [
+        { concept: "Congo red", kind: "fact", provenance: "taught", ordinal: 1 },
+        { concept: "Apple-green birefringence", kind: "fact", provenance: "taught", ordinal: 2 },
+      ],
+      targetConcept: "Apple-green birefringence",
+      practiceQuestions: [
+        { question: "Which stain confirms amyloid?", answer: "Congo red.", conceptOrdinals: [1] },
+        {
+          question: "What do you see under polarised light?",
+          answer: "Apple-green birefringence.",
+          conceptOrdinals: [1, 2],
+        },
+      ],
+    },
+    { profile, model },
+  );
+
+  const prompt = prompts[0];
+  expect(prompt).toMatch(/Which stain confirms amyloid\? \(tests concept 1\)/);
+  expect(prompt).toMatch(/polarised light\? \(tests concepts 1, 2\)/);
+  // The question that tests the target leads, and the lead-in says so.
+  expect(prompt.indexOf("polarised light?")).toBeLessThan(prompt.indexOf("Which stain confirms"));
+  expect(prompt).toMatch(/target concept first/i);
+});

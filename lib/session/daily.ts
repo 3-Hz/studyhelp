@@ -10,6 +10,7 @@ import type {
 import { dailyBudget, DEFAULT_MINUTES } from "./budget";
 import { dailyCandidates } from "./candidates";
 import type { SessionKind } from "./kind";
+import { practiceContext } from "./practice";
 import { priorAttempts } from "./prior";
 import { allowedFormats, select, type PlannedSlot } from "./select";
 
@@ -132,7 +133,7 @@ export const dailyKind: SessionKind<DailyMaterial> = {
     for (const question of questions) {
       if (question.loId === null) continue;
       const list = practiceByLo.get(question.loId) ?? [];
-      list.push({ question: question.question, answer: question.answer });
+      list.push(practiceContext(question, siblingsByLo.get(question.loId) ?? []));
       practiceByLo.set(question.loId, list);
     }
 

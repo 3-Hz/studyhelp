@@ -36,6 +36,8 @@ export interface ConceptContext {
 export interface PracticeQuestionContext {
   question: string;
   answer: string;
+  /** The numbers, within the objective's list, of the concepts it tests. */
+  conceptOrdinals?: number[];
 }
 
 /** The most recent graded attempt on a concept, from an earlier session. */
@@ -112,11 +114,37 @@ function targetLine(context: TurnContext): string {
   return `Target concept: ${number}${context.targetConcept}`;
 }
 
-function practiceLines(questions: PracticeQuestionContext[] | undefined): string {
+/**
+ * The lecture's own questions for the objective, each with the numbered
+ * concepts it tests. Any that test the target concept lead, so the tutor
+ * sees the fitting one first; the rest keep the order the lecture posed them.
+ */
+function practiceLines(context: TurnContext): string {
+  const questions = context.practiceQuestions;
   if (!questions || questions.length === 0) return "";
+
+  const target = context.targetConcept
+    ? context.concepts.find((c) => c.concept === context.targetConcept)?.ordinal
+    : undefined;
+  const testsTarget = (q: PracticeQuestionContext) =>
+    target !== undefined && (q.conceptOrdinals ?? []).includes(target);
+  const ordered = [...questions].sort(
+    (a, b) => Number(testsTarget(b)) - Number(testsTarget(a)),
+  );
+
+  const tests = (q: PracticeQuestionContext) => {
+    const numbers = q.conceptOrdinals ?? [];
+    if (numbers.length === 0) return "";
+    return numbers.length === 1
+      ? ` (tests concept ${numbers[0]})`
+      : ` (tests concepts ${numbers.join(", ")})`;
+  };
+
   return [
-    "Practice questions the lecture itself provides for this objective. Prefer one of these, or a close variant, when it tests the target concept:",
-    ...questions.map((q) => `- Q: ${q.question}\n  A: ${q.answer || "(no answer given in the materials)"}`),
+    "Practice questions the lecture itself provides for this objective, each with the numbered concepts it tests, any that test the target concept first. Prefer one of these, or a close variant, when it tests the target concept:",
+    ...ordered.map(
+      (q) => `- Q: ${q.question}${tests(q)}\n  A: ${q.answer || "(no answer given in the materials)"}`,
+    ),
   ].join("\n");
 }
 
@@ -204,7 +232,7 @@ export async function askQuestion(
     "",
     "Concepts available to build from:",
     conceptLines(context.concepts),
-    practiceLines(context.practiceQuestions),
+    practiceLines(context),
     used,
   ]
     .filter(Boolean)

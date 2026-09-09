@@ -7,6 +7,7 @@ import type {
   QuestionFormat,
 } from "@/lib/tutor";
 import { DEFAULT_MINUTES, reviewBudget } from "./budget";
+import { practiceContext } from "./practice";
 import type { SessionKind } from "./kind";
 import { planNextTurn, type GradedTurn, type PlannedObjective } from "./plan";
 import { allowedFormats, FORMAT_FAMILY } from "./select";
@@ -139,7 +140,7 @@ export const reviewKind: SessionKind<ReviewMaterial> = {
       for (const question of questions) {
         if (question.loId === null) continue;
         const list = practiceByLo.get(question.loId) ?? [];
-        list.push({ question: question.question, answer: question.answer });
+        list.push(practiceContext(question, itemsByLo.get(question.loId) ?? []));
         practiceByLo.set(question.loId, list);
       }
     }
