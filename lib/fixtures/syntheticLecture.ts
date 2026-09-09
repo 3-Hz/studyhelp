@@ -48,6 +48,17 @@ export interface GroundTruth {
    * instead, since they are in the materials.
    */
   deemphasized: string[];
+  /**
+   * The practice quiz's questions, each with the concept it tests. One
+   * concept appears only in the quiz's answer key: a model that extracts it
+   * read the quiz as course material, and the link says it filed it.
+   */
+  quizTested: { question: string; concept: string }[];
+  /**
+   * Concepts stated only in the handout. A model that labels them
+   * "supplemental" read course material as outside knowledge.
+   */
+  additionalOnlyConcepts: string[];
 }
 
 export const groundTruth: GroundTruth = {
@@ -79,6 +90,17 @@ export const groundTruth: GroundTruth = {
   // that reads only one source is caught.
   emphasized: ["low voltage", "apple-green birefringence"],
   deemphasized: ["V122I", "lag phase"],
+  quizTested: [
+    {
+      question: "Which precursor protein forms the fibril in wild-type ATTR amyloidosis?",
+      concept: "transthyretin",
+    },
+    {
+      question: "Which light-chain isotype is more often implicated in AL amyloidosis?",
+      concept: "lambda",
+    },
+  ],
+  additionalOnlyConcepts: ["SAP scintigraphy"],
 };
 
 /**
@@ -383,5 +405,47 @@ export function syntheticTranscript(): string {
     "AL versus ATTR next, and this one you do need. AL is a light chain from a plasma cell clone; ATTR is transthyretin, hereditary or wild-type.",
     "AL takes kidney and heart together. Wild-type ATTR is mostly cardiac, and it is missed constantly in older men.",
     "We will come back to the free light chain assay after the break, and then the cases.",
+  ].join("\n");
+}
+
+/**
+ * The practice quiz as its own deck: two questions, with the answers on the
+ * slide after them rather than in notes, so the answer-key path is what gets
+ * read. The second answer states something no other material does.
+ */
+export function syntheticQuizDeck(): Uint8Array {
+  return buildPptx([
+    {
+      body: [
+        "Practice quiz — Systemic Amyloidosis",
+        "Two questions. The answer key is on the last slide.",
+      ],
+    },
+    {
+      body: [
+        "Questions",
+        ...groundTruth.quizTested.map((item, i) => `${i + 1}. ${item.question}`),
+      ],
+    },
+    {
+      body: [
+        "Answer key",
+        "1. Transthyretin, wild-type: the same protein as in hereditary ATTR, without a variant.",
+        "2. Lambda, roughly three times as often as kappa.",
+      ],
+    },
+  ]);
+}
+
+/**
+ * A handout as plain text, uploaded as additional material. It states one
+ * thing nothing else does, so a model that reads a handout as course material
+ * can be told from one that ignores it or files it as outside knowledge.
+ */
+export function syntheticHandout(): string {
+  return [
+    "Further reading: imaging amyloid load.",
+    "SAP scintigraphy uses radiolabelled serum amyloid P component, which binds every type of amyloid deposit, to image whole-body amyloid load. It is offered at only a few national centres.",
+    "Serial SAP scintigraphy is the established way to show regression of deposits over time, and it is used to follow response once the precursor supply has been cut off.",
   ].join("\n");
 }

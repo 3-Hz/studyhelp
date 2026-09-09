@@ -39,6 +39,16 @@ export interface Score {
    * without the audit trail the prompt asks for.
    */
   deemphasisMissed: string[];
+  /**
+   * Planted quiz questions the model did not find, or found without linking
+   * to a concept that names what they test: absent, or present but unlinked.
+   */
+  quizConceptsMissed: string[];
+  /**
+   * Handout-only concepts the model left out or labelled supplemental: course
+   * material read as outside knowledge.
+   */
+  additionalMissed: string[];
   conceptCount: number;
 }
 
@@ -132,6 +142,40 @@ export function scoreExtract(
     return kept.length === 0 ? [] : [`${keyword} → "${kept[0].label}" marked ${kept[0].emphasis}`];
   });
 
+  // A quiz question counts when it was found, close wording allowed as above,
+  // and one of the concepts it names mentions the planted keyword.
+  const findQuestion = (expected: string) => {
+    const key = normaliseKey(expected);
+    return extract.practiceQuestions.find((item) => {
+      const got = normaliseKey(item.question);
+      return got.length > 0 && (got.includes(key) || key.includes(got));
+    });
+  };
+  const quizConceptsMissed = truth.quizTested.flatMap(({ question, concept }) => {
+    const found = findQuestion(question);
+    if (!found) return [`${concept} — question not found`];
+    const linked = (found.conceptIndexes ?? [])
+      .map((i) => extract.concepts[i])
+      .filter((c) => c !== undefined);
+    const names = (c: (typeof linked)[number]) =>
+      `${c.label} ${c.detail}`.toLowerCase().includes(concept.toLowerCase());
+    if (linked.some(names)) return [];
+    return [
+      mentioning(concept).length === 0
+        ? `${concept} — concept absent`
+        : `${concept} — concept present but not linked from the question`,
+    ];
+  });
+
+  // Handout content is course material; "supplemental" here means the model
+  // read a handout as outside knowledge.
+  const additionalMissed = truth.additionalOnlyConcepts.flatMap((keyword) => {
+    const mentions = mentioning(keyword);
+    if (mentions.length === 0) return [`${keyword} — absent`];
+    const asTaught = mentions.find((c) => c.provenance !== "supplemental");
+    return asTaught ? [] : [`${keyword} → "${mentions[0].label}" labelled supplemental`];
+  });
+
   return {
     exact,
     paraphrased,
@@ -142,6 +186,8 @@ export function scoreExtract(
     practiceQuestionsFound,
     emphasisMissed,
     deemphasisMissed,
+    quizConceptsMissed,
+    additionalMissed,
     conceptCount: extract.concepts.length,
   };
 }

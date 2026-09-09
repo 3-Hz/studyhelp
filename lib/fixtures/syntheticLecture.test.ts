@@ -3,6 +3,8 @@ import { parsePptx } from "@/lib/ingest/parsePptx";
 import {
   groundTruth,
   syntheticDeck,
+  syntheticHandout,
+  syntheticQuizDeck,
   syntheticSlideCount,
   syntheticTranscript,
 } from "./syntheticLecture";
@@ -203,4 +205,88 @@ test("the deck and transcript together fit in one call on a long-context model",
     },
   );
   expect(chunks).toHaveLength(1);
+});
+
+/** Parsed lazily, so a missing export fails the test rather than the file. */
+function quizSlides() {
+  return parsePptx(syntheticQuizDeck());
+}
+
+test("the quiz deck is a title, the questions, and an answer key on its own slide", () => {
+  const slides = quizSlides();
+  expect(slides).toHaveLength(3);
+  expect(groundTruth.quizTested.length).toBeGreaterThan(1);
+  for (const { question } of groundTruth.quizTested) {
+    expect(slides[1].slideText).toContain(question);
+    expect(slides[2].slideText).not.toContain(question);
+  }
+  expect(slides[2].slideText).toContain("Answer");
+  // No notes: the answers live on the following slide, the answer-key path.
+  expect(slides.every((s) => s.notesText === "")).toBe(true);
+});
+
+test("each quiz question's concept is in the answer key, and one is found nowhere else", () => {
+  const answers = quizSlides()[2].slideText.toLowerCase();
+  const lecture = `${allText}\n${syntheticTranscript().toLowerCase()}`;
+  for (const { concept } of groundTruth.quizTested) {
+    expect(answers).toContain(concept.toLowerCase());
+  }
+  // One quiz-only concept: a model that extracts it read the quiz as course
+  // material. One taught concept: the link is checked on familiar ground too.
+  const quizOnly = groundTruth.quizTested.filter(
+    ({ concept }) => !lecture.includes(concept.toLowerCase()),
+  );
+  expect(quizOnly).toHaveLength(1);
+  expect(quizOnly.length).toBeLessThan(groundTruth.quizTested.length);
+});
+
+test("the handout's concepts appear nowhere in the deck, the transcript or the quiz", () => {
+  const handout = syntheticHandout().toLowerCase();
+  const rest = [
+    allText,
+    syntheticTranscript(),
+    ...quizSlides().map((s) => s.slideText),
+  ]
+    .join("\n")
+    .toLowerCase();
+  expect(groundTruth.additionalOnlyConcepts.length).toBeGreaterThan(0);
+  for (const keyword of groundTruth.additionalOnlyConcepts) {
+    expect(handout).toContain(keyword.toLowerCase());
+    expect(rest).not.toContain(keyword.toLowerCase());
+  }
+});
+
+test("the lecture, transcript, quiz and handout together fit one call on a long-context model", async () => {
+  const { chunkLecture } = await import("@/lib/extract/chunk");
+  const { chunkTranscript } = await import("@/lib/ingest/parseTranscript");
+  const quiz = quizSlides().map((s) => ({
+    ...s,
+    ordinal: slides.length + s.ordinal,
+    role: "quiz" as const,
+  }));
+  const chunks = chunkLecture(
+    {
+      slides: [...slides, ...quiz],
+      transcriptChunks: [
+        ...chunkTranscript(syntheticTranscript()).map((c) => ({ text: c.text })),
+        ...chunkTranscript(syntheticHandout()).map((c) => ({
+          text: c.text,
+          role: "additional" as const,
+        })),
+      ],
+    },
+    {
+      role: "extract",
+      providerId: "google",
+      modelId: "gemini",
+      contextTokens: 1_000_000,
+      maxOutputTokens: 16_000,
+      supportsFileParts: true,
+      supportsImages: true,
+      structuredOutput: "native",
+    },
+  );
+  expect(chunks).toHaveLength(1);
+  expect(chunks[0].text).toContain("# Practice quiz");
+  expect(chunks[0].text).toContain("# Additional course material");
 });

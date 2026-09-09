@@ -15,6 +15,13 @@ const truth: GroundTruth = {
   practiceQuestions: ["Which stain confirms amyloid on the biopsy?"],
   emphasized: ["low voltage"],
   deemphasized: ["V122I"],
+  quizTested: [
+    {
+      question: "Which light-chain isotype is more often implicated in AL amyloidosis?",
+      concept: "lambda",
+    },
+  ],
+  additionalOnlyConcepts: ["SAP scintigraphy"],
 };
 
 function extract(partial: Partial<LectureExtract>): LectureExtract {
@@ -268,4 +275,89 @@ test("a de-emphasized concept marked as such, or left out altogether, is not mis
 
   const absent = scoreExtract(extract({ concepts: [] }), truth);
   expect(absent.deemphasisMissed).toEqual([]);
+});
+
+function labelled(
+  label: string,
+  provenance: "taught" | "derived" | "supplemental" = "taught",
+): LectureExtract["concepts"][number] {
+  return {
+    label,
+    detail: "",
+    kind: "fact",
+    provenance,
+    emphasis: "neutral",
+    emphasisCue: "",
+    relatedObjectiveIndexes: [],
+  };
+}
+
+function quizQuestion(conceptIndexes: number[]): LectureExtract["practiceQuestions"][number] {
+  return {
+    question: "Quiz: which light-chain isotype is more often implicated in AL amyloidosis?",
+    answer: "Lambda.",
+    slideRefs: [],
+    relatedObjectiveIndexes: [],
+    conceptIndexes,
+  };
+}
+
+test("a quiz question found and linked to the concept it tests is honoured", () => {
+  const score = scoreExtract(
+    extract({
+      concepts: [labelled("Congo red"), labelled("Lambda light chains predominate in AL")],
+      practiceQuestions: [quizQuestion([1])],
+    }),
+    truth,
+  );
+  expect(score.quizConceptsMissed).toEqual([]);
+});
+
+test("a quiz question is missed when it is absent, its concept is absent, or the link is wrong", () => {
+  const noQuestion = scoreExtract(
+    extract({ concepts: [labelled("Lambda light chains predominate in AL")] }),
+    truth,
+  );
+  expect(noQuestion.quizConceptsMissed).toEqual(["lambda — question not found"]);
+
+  const noConcept = scoreExtract(
+    extract({ concepts: [labelled("Congo red")], practiceQuestions: [quizQuestion([0])] }),
+    truth,
+  );
+  expect(noConcept.quizConceptsMissed).toEqual(["lambda — concept absent"]);
+
+  const wrongLink = scoreExtract(
+    extract({
+      concepts: [labelled("Congo red"), labelled("Lambda light chains predominate in AL")],
+      practiceQuestions: [quizQuestion([0])],
+    }),
+    truth,
+  );
+  expect(wrongLink.quizConceptsMissed).toEqual([
+    "lambda — concept present but not linked from the question",
+  ]);
+});
+
+test("a handout concept extracted as taught is honoured", () => {
+  const score = scoreExtract(
+    extract({ concepts: [labelled("SAP scintigraphy images whole-body amyloid load")] }),
+    truth,
+  );
+  expect(score.additionalMissed).toEqual([]);
+});
+
+test("a handout concept is missed when absent or labelled supplemental", () => {
+  const absent = scoreExtract(extract({ concepts: [] }), truth);
+  expect(absent.additionalMissed).toEqual(["SAP scintigraphy — absent"]);
+
+  // The confusion the naming rule guards against: course material read as
+  // outside knowledge.
+  const outside = scoreExtract(
+    extract({
+      concepts: [labelled("SAP scintigraphy images whole-body amyloid load", "supplemental")],
+    }),
+    truth,
+  );
+  expect(outside.additionalMissed).toHaveLength(1);
+  expect(outside.additionalMissed[0]).toContain("supplemental");
 });

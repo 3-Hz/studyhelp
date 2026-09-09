@@ -10,14 +10,16 @@
  */
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { extractLecture, type TranscriptSection } from "@/lib/extract";
+import { extractLecture, type ExtractSlide, type TranscriptSection } from "@/lib/extract";
 import { scoreExtract, verbatimRate, type Score } from "@/lib/eval/score";
 import {
   groundTruth,
   syntheticDeck,
+  syntheticHandout,
+  syntheticQuizDeck,
   syntheticTranscript,
 } from "@/lib/fixtures/syntheticLecture";
-import { parsePptx, type ParsedSlide } from "@/lib/ingest/parsePptx";
+import { parsePptx } from "@/lib/ingest/parsePptx";
 import { chunkTranscript } from "@/lib/ingest/parseTranscript";
 import { describeProfile, profileFor } from "@/lib/llm/config";
 import { resolveModel } from "@/lib/llm/provider";
@@ -87,7 +89,7 @@ function isRateLimit(error: unknown): boolean {
 
 async function run(
   entry: EvalProfile,
-  slides: ParsedSlide[],
+  slides: ExtractSlide[],
   transcriptChunks: TranscriptSection[],
 ): Promise<Outcome> {
   const env = { ...process.env, ...entry.env } as Record<
@@ -154,13 +156,25 @@ function cuesHonoured(s: Score): string {
   return `${planted - s.emphasisMissed.length - s.deemphasisMissed.length}/${planted}`;
 }
 
+/** Quiz questions found and filed under the concept they test, over those planted. */
+function quizHonoured(s: Score): string {
+  const planted = groundTruth.quizTested.length;
+  return `${planted - s.quizConceptsMissed.length}/${planted}`;
+}
+
+/** Handout concepts read as course material, over those planted. */
+function additionalHonoured(s: Score): string {
+  const planted = groundTruth.additionalOnlyConcepts.length;
+  return `${planted - s.additionalMissed.length}/${planted}`;
+}
+
 function report(outcomes: Outcome[]): void {
   const total = groundTruth.objectives.length;
 
   console.log(
-    `\n${pad("PROFILE", 12)} ${pad("VERBATIM", 10)} ${pad("PARA", 6)} ${pad("MISS", 6)} ${pad("HALLUC", 8)} ${pad("PROV", 6)} ${pad("EMPH", 6)} ${pad("PATH", 20)} TIME`,
+    `\n${pad("PROFILE", 12)} ${pad("VERBATIM", 10)} ${pad("PARA", 6)} ${pad("MISS", 6)} ${pad("HALLUC", 8)} ${pad("PROV", 6)} ${pad("EMPH", 6)} ${pad("QUIZ", 6)} ${pad("ADDL", 6)} ${pad("PATH", 20)} TIME`,
   );
-  console.log("─".repeat(99));
+  console.log("─".repeat(113));
 
   for (const outcome of outcomes) {
     if (!outcome.ok || !outcome.score) {
@@ -182,6 +196,8 @@ function report(outcomes: Outcome[]): void {
         `${pad(String(s.hallucinated.length), 8)} ` +
         `${pad(String(s.provenanceErrors.length), 6)} ` +
         `${pad(cuesHonoured(s), 6)} ` +
+        `${pad(quizHonoured(s), 6)} ` +
+        `${pad(additionalHonoured(s), 6)} ` +
         `${pad(path, 20)} ` +
         `${((outcome.ms ?? 0) / 1000).toFixed(1)}s`,
     );
@@ -223,6 +239,14 @@ function report(outcomes: Outcome[]): void {
       console.log("   Lecturer's cues not honoured:");
       for (const c of cuesMissed) console.log(`     ${c}`);
     }
+    if (s.quizConceptsMissed.length > 0) {
+      console.log("   Quiz questions not filed under the concept they test:");
+      for (const q of s.quizConceptsMissed) console.log(`     ${q}`);
+    }
+    if (s.additionalMissed.length > 0) {
+      console.log("   Handout concepts not read as course material:");
+      for (const a of s.additionalMissed) console.log(`     ${a}`);
+    }
     console.log(
       `   Concepts: ${s.conceptCount} · notes-only facts found: ` +
         `${s.notesFactsFound.length}/${groundTruth.notesOnlyFacts.length} · practice questions found: ` +
@@ -244,7 +268,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  let slides: ParsedSlide[];
+  let slides: ExtractSlide[];
   let transcriptChunks: TranscriptSection[] = [];
   if (args.deck) {
     console.log(
@@ -254,12 +278,34 @@ async function main(): Promise<void> {
     );
     slides = parsePptx(await readFile(args.deck));
   } else {
-    slides = parsePptx(syntheticDeck());
-    transcriptChunks = chunkTranscript(syntheticTranscript()).map((chunk) => ({
-      text: chunk.text,
+    // Labelled and headed as the app would label an upload in each box.
+    const lecture = parsePptx(syntheticDeck()).map((slide) => ({
+      ...slide,
+      sourceLabel: "lecture.pptx",
+      role: "deck" as const,
     }));
+    const quiz = parsePptx(syntheticQuizDeck()).map((slide) => ({
+      ...slide,
+      ordinal: lecture.length + slide.ordinal,
+      sourceLabel: "practice-quiz.pptx",
+      role: "quiz" as const,
+    }));
+    slides = [...lecture, ...quiz];
+    transcriptChunks = [
+      ...chunkTranscript(syntheticTranscript()).map((chunk) => ({
+        text: chunk.text,
+        sourceLabel: "lecture.vtt",
+        role: "transcript" as const,
+      })),
+      ...chunkTranscript(syntheticHandout()).map((chunk) => ({
+        text: chunk.text,
+        sourceLabel: "handout.txt",
+        role: "additional" as const,
+      })),
+    ];
     console.log(
-      `\nFixture: synthetic lecture, ${slides.length} slides plus a transcript, ` +
+      `\nFixture: synthetic lecture, ${lecture.length} slides plus a transcript, ` +
+        `a ${quiz.length}-slide practice quiz and a handout, ` +
         `${groundTruth.objectives.length} known objectives.`,
     );
   }
