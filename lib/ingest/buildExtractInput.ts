@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import type { ExtractInput } from "@/lib/extract";
 import { heading } from "@/lib/extract/chunk";
+import type { PriorObjective } from "@/lib/extract/prior";
 import type { SourceRole } from "@/lib/db/schema";
 import { estimateTokens } from "@/lib/llm/tokens";
 import type { ModelProfile } from "@/lib/llm/config";
@@ -115,10 +116,47 @@ export async function buildExtractInput(
     }
   }
 
+  const prior = await priorContent(lectureId);
+
   return {
-    input: { slides, transcriptChunks, documentParts, documentTokens },
+    input: { slides, transcriptChunks, documentParts, documentTokens, prior },
     warnings,
   };
+}
+
+/**
+ * The lecture's objectives and concept labels as they stand, for the model
+ * to reuse. Suspended rows are included: the block anchors wording, not
+ * status, and a set-aside concept re-extracted under a new label would be
+ * a duplicate the student has to find.
+ */
+async function priorContent(lectureId: number): Promise<PriorObjective[]> {
+  const objectives = await db
+    .select()
+    .from(schema.learningObjectives)
+    .where(eq(schema.learningObjectives.lectureId, lectureId))
+    .orderBy(asc(schema.learningObjectives.orderIndex));
+
+  if (objectives.length === 0) return [];
+
+  const items = await db
+    .select()
+    .from(schema.reviewItems)
+    .where(
+      inArray(
+        schema.reviewItems.loId,
+        objectives.map((objective) => objective.id),
+      ),
+    )
+    .orderBy(asc(schema.reviewItems.ordinal), asc(schema.reviewItems.id));
+
+  return objectives.map((objective) => ({
+    text: objective.text,
+    concepts: items
+      .filter((item) => item.loId === objective.id)
+      // Rows written before labels existed carry an empty one.
+      .map((item) => item.label || item.concept.split(" — ")[0]),
+  }));
 }
 
 /**

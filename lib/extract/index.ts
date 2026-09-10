@@ -3,6 +3,7 @@ import type { ModelFilePart } from "@/lib/ingest/documents";
 import { describeProfile, type ModelProfile } from "@/lib/llm/config";
 import { resolveModel } from "@/lib/llm/provider";
 import { generateStructured } from "@/lib/llm/structured";
+import { estimateTokens } from "@/lib/llm/tokens";
 import {
   chunkLecture,
   type ExtractSlide,
@@ -10,7 +11,8 @@ import {
   type TranscriptSection,
 } from "./chunk";
 import { mergeExtracts } from "./merge";
-import { CHUNK_NOTE, EXTRACTION_SYSTEM, LectureExtract } from "./schema";
+import { formatPrior, type PriorObjective } from "./prior";
+import { CHUNK_NOTE, EXTRACTION_SYSTEM, LectureExtract, PRIOR_NOTE } from "./schema";
 
 export { LectureExtract } from "./schema";
 export type { LectureExtract as LectureExtractType } from "./schema";
@@ -22,6 +24,11 @@ export interface ExtractInput {
   documentParts: ModelFilePart[];
   /** Roughly what documentParts will cost, so chunking can reserve for them. */
   documentTokens?: number;
+  /**
+   * What the lecture already holds, so a re-extraction reuses its wordings.
+   * Absent or empty on a first extraction.
+   */
+  prior?: PriorObjective[];
 }
 
 export interface ExtractionMeta {
@@ -45,10 +52,17 @@ export async function extractLecture(
   /** Injectable for tests; resolved once and shared across chunks otherwise. */
   model: LanguageModel = resolveModel(profile),
 ): Promise<ExtractResult> {
+  // The block rides with every section, so it comes off every section's
+  // budget, the way the documents do.
+  const priorText =
+    input.prior && input.prior.length > 0
+      ? `${PRIOR_NOTE}\n\n${formatPrior(input.prior)}`
+      : "";
+
   const chunks = chunkLecture(
     { slides: input.slides, transcriptChunks: input.transcriptChunks },
     profile,
-    input.documentTokens ?? 0,
+    (input.documentTokens ?? 0) + estimateTokens(priorText),
   );
 
   const baseMeta = {
@@ -68,7 +82,7 @@ export async function extractLecture(
       messages: [
         {
           role: "user",
-          content: buildContent(chunks[0]?.text ?? "", input.documentParts),
+          content: buildContent(chunks[0]?.text ?? "", input.documentParts, priorText),
         },
       ],
     });
@@ -99,6 +113,9 @@ export async function extractLecture(
             // Documents ride along with the first chunk only: re-sending a PDF
             // per chunk would blow the budget the chunking exists to respect.
             position === 0 ? input.documentParts : [],
+            // The anchor block rides with every chunk: each section is
+            // extracted on its own and has to reuse the recorded wordings.
+            priorText,
           ),
         },
       ],
@@ -124,11 +141,16 @@ export async function extractLecture(
 function buildContent(
   lectureText: string,
   documentParts: ModelFilePart[],
+  priorText: string,
 ): UserContent {
   const parts: ModelFilePart[] = [...documentParts];
 
   if (lectureText.trim().length > 0) {
     parts.push({ type: "text", text: lectureText });
+  }
+
+  if (priorText.length > 0) {
+    parts.push({ type: "text", text: priorText });
   }
 
   parts.push({

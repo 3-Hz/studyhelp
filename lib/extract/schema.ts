@@ -153,5 +153,12 @@ Additional course material — handouts, readings, figures — is course materia
 
 Presenter notes carry the explanations the slides omit. Weight them accordingly.`;
 
+/**
+ * Precedes the "Already extracted" block in the user message when a lecture
+ * is extracted again. Fixed text, and in the user message rather than the
+ * system prompt, so the system prompt stays a cacheable prefix.
+ */
+export const PRIOR_NOTE = `This lecture has been extracted before. The block headed "Already extracted" lists its recorded objectives and, under each, the labels of the concepts recorded so far. Where the materials state a recorded objective or concept, copy the recorded wording exactly — the same objective text, the same concept label — so the new extraction lines up with the old. Record anything the materials state that is not listed, under the objective it serves, with a label of its own. Do not rephrase, merge or renumber recorded items, and do not list a recorded item these materials do not state.`;
+
 /** Appended when a lecture is processed in pieces. */
-export const CHUNK_NOTE = `You are seeing ONE SECTION of a longer lecture. Extract only what this section states. Do not speculate about content in other sections, and do not invent objectives to fill gaps. A lecturer's cue about a concept counts as content this section states: extract the concept it refers to with that emphasis, even if the concept is explained more fully in another section. A practice question in this section may test a concept explained in another section: extract that concept here too, so the question can name it; the merge collapses the duplicate.`;
+export const CHUNK_NOTE =`You are seeing ONE SECTION of a longer lecture. Extract only what this section states. Do not speculate about content in other sections, and do not invent objectives to fill gaps. A lecturer's cue about a concept counts as content this section states: extract the concept it refers to with that emphasis, even if the concept is explained more fully in another section. A practice question in this section may test a concept explained in another section: extract that concept here too, so the question can name it; the merge collapses the duplicate.`;

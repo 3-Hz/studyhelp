@@ -238,3 +238,46 @@ test("a quiz PDF is announced before its content", async () => {
   expect(announcement).toMatch(/^# Practice quiz: quiz\.pdf/);
   expect(announcement).toMatch(/answer key/);
 });
+
+test("what the lecture already holds rides along: objectives verbatim, labels in order", async () => {
+  const lectureId = await newLecture("Anchored");
+  await storeSources(lectureId, [
+    { filename: "deck.pptx", role: "deck", bytes: deck([["One"]]) },
+  ]);
+  // Inserted out of order, to show the block follows the numbering, not ids.
+  const [second, first] = await db
+    .insert(schema.learningObjectives)
+    .values([
+      { lectureId, text: "Compare AL and ATTR amyloidosis.", orderIndex: 1 },
+      { lectureId, text: "Describe the structure of amyloid fibrils.", orderIndex: 0 },
+    ])
+    .returning({ id: schema.learningObjectives.id });
+  await db.insert(schema.reviewItems).values([
+    { loId: first.id, ordinal: 2, label: "Fibril diameter", concept: "Fibril diameter — 7–10 nm.", kind: "fact", dueOn: "2026-09-09" },
+    { loId: first.id, ordinal: 1, label: "Beta-pleated sheet", concept: "Beta-pleated sheet — Cross-beta.", kind: "fact", dueOn: "2026-09-09" },
+    // Suspended items anchor wording too: the model must not re-add them.
+    { loId: first.id, ordinal: 3, label: "Set aside", concept: "Set aside", kind: "fact", dueOn: "2026-09-09", suspended: true },
+  ]);
+
+  const { input } = await buildExtractInput(lectureId, profile());
+
+  expect(input.prior).toEqual([
+    {
+      text: "Describe the structure of amyloid fibrils.",
+      concepts: ["Beta-pleated sheet", "Fibril diameter", "Set aside"],
+    },
+    { text: "Compare AL and ATTR amyloidosis.", concepts: [] },
+  ]);
+  void second;
+});
+
+test("a lecture with nothing extracted has nothing to anchor on", async () => {
+  const lectureId = await newLecture("Fresh");
+  await storeSources(lectureId, [
+    { filename: "deck.pptx", role: "deck", bytes: deck([["One"]]) },
+  ]);
+
+  const { input } = await buildExtractInput(lectureId, profile());
+
+  expect(input.prior).toEqual([]);
+});
