@@ -9,19 +9,44 @@ import { MinutesSelect } from "./MinutesSelect";
 export interface PickableLecture {
   id: number;
   title: string;
-  committed: boolean;
+  /** Has at least one objective, so a review has something to ask. */
+  reviewable: boolean;
   objectiveCount: number;
+  conceptCount: number;
+  sourceCount: number;
   /** YYYY-MM-DD, formatted on the server so the two renders agree. */
   addedOn: string;
 }
 
+/** Where the lecture stands: read, waiting to be read, or still empty. */
+function describe(lecture: PickableLecture): string {
+  if (lecture.objectiveCount > 0) {
+    return (
+      `${lecture.objectiveCount} objective${lecture.objectiveCount === 1 ? "" : "s"}` +
+      ` · ${lecture.conceptCount} concept${lecture.conceptCount === 1 ? "" : "s"}`
+    );
+  }
+  if (lecture.sourceCount > 0) {
+    return `${lecture.sourceCount} file${lecture.sourceCount === 1 ? "" : "s"}, not extracted yet`;
+  }
+  return "No materials yet";
+}
+
 /**
- * The lecture list with a box beside each committed lecture and one start
- * bar: tick the lectures to review, say how long you have, go. Starting is
- * a POST rather than a link because it creates a row — and rejoins today's
- * unfinished review of the same lectures instead of opening a second one.
+ * The lecture list with a box beside each lecture that has objectives and
+ * one start bar: tick the lectures to review, say how long you have, go.
+ * Starting is a POST rather than a link because it creates a row — and
+ * rejoins today's unfinished review of the same lectures instead of opening
+ * a second one. `afterList` sits between the list and the bar: the place
+ * for adding a lecture.
  */
-export function ReviewPicker({ lectures }: { lectures: PickableLecture[] }) {
+export function ReviewPicker({
+  lectures,
+  afterList,
+}: {
+  lectures: PickableLecture[];
+  afterList?: React.ReactNode;
+}) {
   const router = useRouter();
   const [chosen, setChosen] = useState<Set<number>>(new Set());
   const [minutes, setMinutes] = useState<number>(DEFAULT_MINUTES);
@@ -66,7 +91,7 @@ export function ReviewPicker({ lectures }: { lectures: PickableLecture[] }) {
             className="flex items-baseline justify-between gap-4 py-4"
           >
             <div className="flex items-baseline gap-3">
-              {lecture.committed ? (
+              {lecture.reviewable ? (
                 <input
                   type="checkbox"
                   checked={chosen.has(lecture.id)}
@@ -84,17 +109,15 @@ export function ReviewPicker({ lectures }: { lectures: PickableLecture[] }) {
                 >
                   {lecture.title}
                 </Link>
-                <p className="mt-0.5 text-xs text-stone-500">
-                  {lecture.committed
-                    ? `${lecture.objectiveCount} objectives on the dashboard`
-                    : "Draft — needs review"}
-                </p>
+                <p className="mt-0.5 text-xs text-stone-500">{describe(lecture)}</p>
               </div>
             </div>
             <span className="text-xs text-stone-400">{lecture.addedOn}</span>
           </li>
         ))}
       </ul>
+
+      {afterList}
 
       <div className="sticky bottom-0 mt-6 flex flex-wrap items-center gap-4 border-t border-stone-200 bg-stone-50 py-4 dark:border-stone-800 dark:bg-stone-950">
         <MinutesSelect value={minutes} onChange={setMinutes} />

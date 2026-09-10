@@ -83,3 +83,34 @@ test("distinguishes committed lectures from drafts", async () => {
   expect(draft?.committedAt).toBeNull();
   expect(lectures.find((l) => l.title === "Amyloidosis")?.committedAt).not.toBeNull();
 });
+
+test("counts each lecture's concepts and files, so the list can say where it stands", async () => {
+  const [lecture] = await db
+    .insert(schema.lectures)
+    .values({ title: "With files" })
+    .returning({ id: schema.lectures.id });
+  const [objective] = await db
+    .insert(schema.learningObjectives)
+    .values({ lectureId: lecture.id, text: "One", orderIndex: 0 })
+    .returning({ id: schema.learningObjectives.id });
+  await db.insert(schema.reviewItems).values([
+    { loId: objective.id, ordinal: 1, label: "A", concept: "A", kind: "fact", dueOn: "2026-09-09" },
+    { loId: objective.id, ordinal: 2, label: "B", concept: "B", kind: "fact", dueOn: "2026-09-09" },
+  ]);
+  await db.insert(schema.lectureSources).values({
+    lectureId: lecture.id,
+    kind: "slide",
+    role: "deck",
+    filename: "deck.pptx",
+    uploadIndex: 1,
+  });
+
+  const byTitle = new Map((await listLectures()).map((l) => [l.title, l]));
+
+  expect(byTitle.get("With files")).toMatchObject({
+    objectiveCount: 1,
+    conceptCount: 2,
+    sourceCount: 1,
+  });
+  expect(byTitle.get("Amyloidosis")).toMatchObject({ conceptCount: 0, sourceCount: 0 });
+});

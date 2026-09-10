@@ -44,10 +44,10 @@ export default async function PracticePage() {
           {candidates.length === 0 ? (
             <>
               Nothing to practise yet.{" "}
-              <Link href="/import" className="underline">
-                Import a lecture
+              <Link href="/lectures" className="underline">
+                Add a lecture
               </Link>{" "}
-              and approve its objectives first.
+              and extract its objectives first.
             </>
           ) : (
             <>

@@ -4,10 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const tabs = [
-  { href: "/lectures", label: "Review Lectures" },
+  { href: "/lectures", label: "Lectures" },
   { href: "/practice", label: "Daily Practice" },
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/import", label: "Import Content" },
 ];
 
 const base = "border-b-2 pb-1 text-sm transition-colors";

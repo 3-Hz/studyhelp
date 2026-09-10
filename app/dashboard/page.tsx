@@ -45,10 +45,10 @@ export default async function DashboardPage() {
         <h1 className="text-2xl font-semibold tracking-tight">LO Dashboard</h1>
         <p className="mt-3 text-sm text-stone-600 dark:text-stone-400">
           No objectives yet.{" "}
-          <Link href="/import" className="underline">
+          <Link href="/lectures" className="underline">
             Add a lecture
           </Link>{" "}
-          to get started.
+            and extract its objectives to get started.
         </p>
       </div>
     );
