@@ -1,18 +1,7 @@
 import { expect, test } from "bun:test";
 import { mergeExtracts, normaliseKey } from "./merge";
 import type { LectureExtract } from "./schema";
-
-function extract(partial: Partial<LectureExtract>): LectureExtract {
-  return {
-    title: "",
-    learningObjectives: [],
-    concepts: [],
-    practiceQuestions: [],
-    commonConfusions: [],
-    conflicts: [],
-    ...partial,
-  };
-}
+import { extract } from "./testUtils";
 
 test("unions practice questions across chunks, deduped on the question", () => {
   const merged = mergeExtracts([

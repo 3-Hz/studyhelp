@@ -184,7 +184,7 @@ type Concept = LectureExtract["concepts"][number];
  * questions, wrongly cutting one costs an exam item. Either outranks neutral,
  * which is only the absence of a cue.
  */
-const EMPHASIS_RANK: Record<ConceptEmphasis, number> = {
+export const EMPHASIS_RANK: Record<ConceptEmphasis, number> = {
   neutral: 0,
   deemphasized: 1,
   emphasized: 2,
