@@ -249,3 +249,35 @@ test("the LO Map says which of the lecture's practice questions test each concep
     ["Which stain confirms amyloid, and what do you see?", "What do you see under polarised light?"],
   ]);
 });
+
+test("each concept carries its label and the lecturer's cue, for the badge", async () => {
+  const cued = extract({
+    title: "Cued",
+    learningObjectives: [{ text: "Describe fibrils.", slideRefs: [1] }],
+    concepts: [
+      {
+        label: "Fibril diameter",
+        detail: "Seven to ten nanometres.",
+        kind: "fact",
+        provenance: "taught",
+        emphasis: "deemphasized",
+        emphasisCue: "You do not need the diameter.",
+        relatedObjectiveIndexes: [0],
+      },
+    ],
+  });
+  const [lecture] = await db
+    .insert(schema.lectures)
+    .values({ title: "Cued", committedAt: new Date() })
+    .returning({ id: schema.lectures.id });
+  await applyExtract(lecture.id, cued);
+
+  const [item] = (await lectureConcepts(lecture.id, TODAY))!.objectives[0].items;
+  expect(item).toMatchObject({
+    label: "Fibril diameter",
+    concept: "Fibril diameter — Seven to ten nanometres.",
+    emphasis: "deemphasized",
+    emphasisCue: "You do not need the diameter.",
+    suspended: true,
+  });
+});

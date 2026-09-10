@@ -79,7 +79,7 @@ export function ReviewPicker({ lectures }: { lectures: PickableLecture[] }) {
               )}
               <div>
                 <Link
-                  href={`/lectures/${lecture.id}/${lecture.committed ? "concepts" : "review"}`}
+                  href={`/lectures/${lecture.id}`}
                   className="font-medium hover:underline"
                 >
                   {lecture.title}

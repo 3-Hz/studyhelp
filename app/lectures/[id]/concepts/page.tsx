@@ -29,9 +29,9 @@ export default async function ConceptsPage({
       <div className="max-w-2xl">
         <h1 className="text-2xl font-semibold tracking-tight">{view.title}</h1>
         <p className="mt-3 text-sm text-stone-600 dark:text-stone-400">
-          Nothing to show until the objectives are committed.{" "}
-          <Link href={`/lectures/${view.id}/review`} className="underline">
-            Review the draft
+          No objectives yet.{" "}
+          <Link href={`/lectures/${view.id}`} className="underline">
+            Add the lecture&rsquo;s files and extract them
           </Link>
           .
         </p>

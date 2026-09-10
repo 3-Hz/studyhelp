@@ -1,6 +1,6 @@
 import { asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
-import type { Mark, Provenance, ReviewKind } from "@/lib/db/schema";
+import type { ConceptEmphasis, Mark, Provenance, ReviewKind } from "@/lib/db/schema";
 import { daysBetween, tierOf, todayIso, type Tier } from "@/lib/schedule";
 
 export interface ConceptRow {
@@ -8,8 +8,13 @@ export interface ConceptRow {
   /** The concept's number within its objective: what a session marks. */
   ordinal: number;
   concept: string;
+  /** The concept's short name: the part of `concept` before the em dash. */
+  label: string;
   kind: ReviewKind;
   provenance: Provenance;
+  /** The lecturer's weighting, with the words behind it; empty when neutral. */
+  emphasis: ConceptEmphasis;
+  emphasisCue: string;
   tier: Tier;
   intervalDays: number;
   lapses: number;
@@ -125,8 +130,12 @@ export async function lectureConcepts(
       id: item.id,
       ordinal: item.ordinal,
       concept: item.concept,
+      // Rows written before labels existed carry an empty one.
+      label: item.label || item.concept.split(" — ")[0],
       kind: item.kind,
       provenance: item.provenance,
+      emphasis: item.emphasis,
+      emphasisCue: item.emphasisCue,
       tier: tierOf(item),
       intervalDays: item.intervalDays,
       lapses: item.lapses,
