@@ -1,6 +1,10 @@
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
-import { extractLecture, type ExtractionMeta } from "@/lib/extract";
+import { applyExtract, type ApplyResult } from "@/lib/applyExtract";
+import {
+  extractLecture as readMaterials,
+  type ExtractionMeta,
+} from "@/lib/extract";
 import type { LectureExtract } from "@/lib/extract/schema";
 import { profileFor, type ModelProfile } from "@/lib/llm/config";
 import { buildExtractInput } from "./buildExtractInput";
@@ -8,144 +12,111 @@ import {
   storeSources,
   UnsupportedFilesError,
   type IncomingFile,
+  type StoreResult,
 } from "./storeSources";
 
 export { UnsupportedFilesError } from "./storeSources";
 export type { IncomingFile } from "./storeSources";
 
-/** A lecture whose objectives are already scheduled will not take new files. */
-export class LectureCommittedError extends Error {
+export class LectureNotFoundError extends Error {
+  constructor(lectureId: number) {
+    super(`Lecture ${lectureId} not found.`);
+    this.name = "LectureNotFoundError";
+  }
+}
+
+/** Extraction was asked of a lecture with no files, new or stored. */
+export class NothingToExtractError extends Error {
   constructor() {
-    super(
-      "This lecture has already been committed, so its files are fixed. Its objectives are on the dashboard with their review history.",
-    );
-    this.name = "LectureCommittedError";
+    super("Add at least one file: this lecture has none to read.");
+    this.name = "NothingToExtractError";
   }
 }
 
-export interface IngestResult {
-  lectureId: number;
-  extract: LectureExtract;
-  meta: ExtractionMeta;
-  warnings: string[];
-  skipped: string[];
-}
-
-/**
- * Parses uploads, stores them as lecture sources, and runs extraction against
- * whichever model is configured for the `extract` role.
- *
- * The result is written to `lectures.draft_extract` as a DRAFT — nothing lands
- * in `learning_objectives` until a human approves it. Any capability warnings
- * (PDF read as text, images skipped) ride along so a degraded draft is visibly
- * degraded rather than quietly worse.
- */
-export async function ingestLecture(
-  files: IncomingFile[],
-  fallbackTitle: string,
-): Promise<IngestResult> {
-  if (files.length === 0) {
-    throw new Error("No files were uploaded.");
-  }
-
-  const profile = profileFor("extract");
+/** A lecture begins as a title. Its files, and their reading, come after. */
+export async function createLecture(title: string): Promise<number> {
+  const trimmed = title.trim();
+  if (trimmed.length === 0) throw new Error("Give the lecture a title.");
 
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: fallbackTitle })
+    .values({ title: trimmed })
     .returning({ id: schema.lectures.id });
-
-  let stored: Awaited<ReturnType<typeof storeSources>>;
-  try {
-    stored = await storeSources(lecture.id, files);
-  } catch (error) {
-    await db.delete(schema.lectures).where(eq(schema.lectures.id, lecture.id));
-    throw error;
-  }
-
-  if (stored.stored.length === 0) {
-    // Nothing usable came through — don't leave an orphan lecture behind.
-    await db.delete(schema.lectures).where(eq(schema.lectures.id, lecture.id));
-    throw new UnsupportedFilesError(stored);
-  }
-
-  const extraction = await runExtraction(
-    lecture.id,
-    fallbackTitle,
-    profile,
-    stored.warnings,
-  );
-
-  return {
-    lectureId: lecture.id,
-    ...extraction,
-    skipped: stored.skipped,
-  };
+  return lecture.id;
 }
 
-export interface AddSourcesResult {
+export interface IngestDeps {
+  /** The model read; injectable so tests need no provider. */
+  extract?: typeof readMaterials;
+}
+
+export interface ExtractLectureResult {
   extract: LectureExtract;
   meta: ExtractionMeta;
   warnings: string[];
   skipped: string[];
   stored: string[];
+  applied: ApplyResult;
 }
 
 /**
- * Adds files to a lecture that already exists, then rebuilds its draft from
- * everything the lecture now holds. Slides keep the numbers they were given,
- * so a reference to slide 12 still means slide 12 after a transcript arrives.
- *
- * Committed lectures are refused: their objectives are already scheduled and
- * carry performance history, so silently redrafting underneath them would
- * rewrite what the student has been revising.
+ * Stores any new files, reads everything the lecture holds, and fits the
+ * result onto its rows. One path serves the first extraction and every
+ * amend: the model is shown what is already recorded so it reuses the
+ * wordings, and the rows it names again are kept with their numbers and
+ * history while the rest append. With no new files it re-reads the stored
+ * ones, which is how a lecture is re-run on a better model, or recovered
+ * from a write that failed halfway.
  */
-export async function addSourcesToLecture(
+export async function extractLecture(
   lectureId: number,
   files: IncomingFile[],
-): Promise<AddSourcesResult> {
-  if (files.length === 0) {
-    throw new Error("No files were uploaded.");
-  }
-
+  deps: IngestDeps = {},
+): Promise<ExtractLectureResult> {
   const lecture = await db.query.lectures.findFirst({
     where: eq(schema.lectures.id, lectureId),
   });
+  if (!lecture) throw new LectureNotFoundError(lectureId);
 
-  if (!lecture) throw new Error(`Lecture ${lectureId} not found.`);
-  if (lecture.committedAt) throw new LectureCommittedError();
-
-  const profile = profileFor("extract");
-  const stored = await storeSources(lectureId, files);
-
-  if (stored.stored.length === 0) {
-    throw new UnsupportedFilesError(stored);
+  let stored: StoreResult = { stored: [], skipped: [], warnings: [] };
+  if (files.length > 0) {
+    stored = await storeSources(lectureId, files);
+    if (stored.stored.length === 0) throw new UnsupportedFilesError(stored);
   }
+
+  const anySource = await db.query.lectureSources.findFirst({
+    where: eq(schema.lectureSources.lectureId, lectureId),
+  });
+  if (!anySource) throw new NothingToExtractError();
 
   const extraction = await runExtraction(
     lectureId,
-    lecture.title,
-    profile,
+    profileFor("extract"),
     stored.warnings,
+    deps.extract ?? readMaterials,
   );
+  const applied = await applyExtract(lectureId, extraction.extract);
 
-  return { ...extraction, skipped: stored.skipped, stored: stored.stored };
+  return {
+    ...extraction,
+    skipped: stored.skipped,
+    stored: stored.stored,
+    applied,
+  };
 }
 
 /**
- * Re-reads everything attached to a lecture and rewrites its draft. Shared by
- * first ingest and later additions so the two cannot drift apart.
+ * Reads everything attached to a lecture and records the raw result. The
+ * title is the student's and is never written over. The extract is saved
+ * before it is applied, so a write that fails halfway leaves something to
+ * inspect, and the next Extract completes it.
  */
 async function runExtraction(
   lectureId: number,
-  fallbackTitle: string,
   profile: ModelProfile,
   priorWarnings: string[],
-): Promise<{
-  extract: LectureExtract;
-  meta: ExtractionMeta;
-  warnings: string[];
-}> {
+  read: typeof readMaterials,
+): Promise<{ extract: LectureExtract; meta: ExtractionMeta; warnings: string[] }> {
   const { input, warnings: inputWarnings } = await buildExtractInput(
     lectureId,
     profile,
@@ -153,7 +124,7 @@ async function runExtraction(
 
   const warnings = [...priorWarnings, ...inputWarnings];
 
-  const { extract, meta } = await extractLecture(input, profile);
+  const { extract, meta } = await read(input, profile);
 
   if (meta.chunked) {
     warnings.push(
@@ -164,7 +135,6 @@ async function runExtraction(
   await db
     .update(schema.lectures)
     .set({
-      title: extract.title || fallbackTitle,
       draftExtract: extract,
       extractionMeta: meta,
       extractionWarnings: warnings,

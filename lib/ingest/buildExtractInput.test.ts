@@ -13,7 +13,6 @@ process.env.UPLOAD_DIR = TEST_UPLOADS;
 const { db, schema } = await import("@/lib/db");
 const { storeSources } = await import("./storeSources");
 const { buildExtractInput } = await import("./buildExtractInput");
-const { addSourcesToLecture } = await import("./ingestLecture");
 const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
 
 function profile(overrides: Partial<ModelProfile> = {}): ModelProfile {
@@ -171,32 +170,6 @@ test("a stored file that has gone missing is reported, not silently dropped", as
   expect(input.documentParts).toHaveLength(0);
   expect(warnings.join(" ")).toContain("figure.png");
   expect(warnings.join(" ")).toContain("missing");
-});
-
-test("a committed lecture refuses new files", async () => {
-  const lectureId = await newLecture("Already committed");
-
-  await storeSources(lectureId, [
-    { filename: "deck.pptx", role: "deck", bytes: deck([["One"]]) },
-  ]);
-  await db
-    .update(schema.lectures)
-    .set({ committedAt: new Date() })
-    .where(eq(schema.lectures.id, lectureId));
-
-  await expect(
-    addSourcesToLecture(lectureId, [
-      { filename: "late.vtt", role: "transcript", bytes: text("the transcript, too late") },
-    ]),
-  ).rejects.toThrow(/already been committed/);
-
-  // And nothing was written on the way to refusing.
-  const sources = await db
-    .select()
-    .from(schema.lectureSources)
-    .where(eq(schema.lectureSources.lectureId, lectureId));
-  expect(sources.map((s) => s.filename)).toEqual(["deck.pptx"]);
-
 });
 
 test("roles reach the slides and the transcript sections", async () => {
