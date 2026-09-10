@@ -26,7 +26,9 @@ export async function POST(
       return NextResponse.json({ error: "Bad lecture id." }, { status: 400 });
     }
 
-    const files = await filesFromForm(await request.formData());
+    // A bare POST, with no form at all, is a re-run over the stored files.
+    const multipart = (request.headers.get("content-type") ?? "").includes("multipart/form-data");
+    const files = multipart ? await filesFromForm(await request.formData()) : [];
     const result = await extractLecture(lectureId, files);
 
     return NextResponse.json({
