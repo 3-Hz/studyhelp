@@ -65,7 +65,7 @@ async function seedLecture(title: string, objectives: number, block: string) {
   const draft = draftFor(title, objectives);
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title, block, committedAt: new Date() })
+    .values({ title, block })
     .returning({ id: schema.lectures.id });
 
   await applyExtract(lecture.id, draft);
@@ -502,7 +502,7 @@ test("daily practice questions carry the numbers of the concepts they test", asy
   };
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: "Quizzed", committedAt: new Date() })
+    .values({ title: "Quizzed" })
     .returning({ id: schema.lectures.id });
   await applyExtract(lecture.id, linked);
   const objective = (await db.query.learningObjectives.findFirst({

@@ -81,7 +81,7 @@ beforeAll(async () => {
   migrate(db, { migrationsFolder: "./drizzle" });
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: draft.title, committedAt: new Date() })
+    .values({ title: draft.title })
     .returning({ id: schema.lectures.id });
   lectureId = lecture.id;
   await applyExtract(lectureId, draft);

@@ -135,7 +135,7 @@ async function runExtraction(
   await db
     .update(schema.lectures)
     .set({
-      draftExtract: extract,
+      lastExtract: extract,
       extractionMeta: meta,
       extractionWarnings: warnings,
       extractedAt: new Date(),

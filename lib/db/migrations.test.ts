@@ -466,3 +466,66 @@ test("0011 backfills each concept's label from the text before its first em dash
     { label: "A", emphasis: "neutral", emphasis_cue: "" },
   ]);
 });
+
+// --- 0012: a lecture no longer has a commit ---
+
+const DROP_COMMIT = files.find((file) => file.startsWith("0012_"));
+const BEFORE_DROP_COMMIT = files.filter((file) => file < "0012_");
+
+test("0012 drops committed_at and keeps the lecture's other columns and rows", () => {
+  expect(DROP_COMMIT).toBeDefined();
+  const sqlite = new Database(":memory:");
+  for (const file of BEFORE_DROP_COMMIT) apply(sqlite, file);
+  sqlite.exec(
+    "INSERT INTO lectures (title, draft_extract, committed_at) VALUES ('Amyloidosis', '{\"title\":\"x\"}', 1)",
+  );
+
+  apply(sqlite, DROP_COMMIT!);
+
+  expect(columnsOf(sqlite, "lectures")).not.toContain("committed_at");
+  // The column keeps its name: it now holds the last extraction applied.
+  expect(columnsOf(sqlite, "lectures")).toContain("draft_extract");
+  const row = sqlite
+    .prepare("SELECT title, draft_extract FROM lectures")
+    .get() as { title: string; draft_extract: string };
+  expect(row).toEqual({ title: "Amyloidosis", draft_extract: '{"title":"x"}' });
+});
+
+test("the migrator keeps a lecture's objectives, concepts and files through 0012's rebuild of lectures", () => {
+  const dir = `./.test-migrations-0012-${process.pid}`;
+  const path = `${dir}/rebuild.db`;
+  rmSync(dir, { recursive: true, force: true });
+  folderUpTo("0011_first_blackheart", dir);
+
+  const sqlite = new Database(path, { create: true });
+  sqlite.exec("PRAGMA foreign_keys = ON;");
+  const db = drizzle(sqlite);
+
+  try {
+    runMigrations(db, dir);
+    sqlite.exec("INSERT INTO lectures (title, committed_at) VALUES ('Amyloidosis', 1)");
+    sqlite.exec(
+      "INSERT INTO learning_objectives (lecture_id, text, order_index) VALUES (1, 'Describe fibrils.', 0)",
+    );
+    sqlite.exec(
+      "INSERT INTO review_items (lo_id, concept, kind, due_on) VALUES (1, 'Congo red', 'fact', '2026-09-09')",
+    );
+    sqlite.exec(
+      "INSERT INTO lecture_sources (lecture_id, kind, role, filename, upload_index) VALUES (1, 'slide', 'deck', 'deck.pptx', 1)",
+    );
+
+    // Dropping a column rebuilds the table; with foreign keys on, the DROP
+    // TABLE inside would cascade through everything hanging off a lecture.
+    runMigrations(db, "./drizzle");
+
+    const count = (table: string) =>
+      (sqlite.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
+    expect(count("learning_objectives")).toBe(1);
+    expect(count("review_items")).toBe(1);
+    expect(count("lecture_sources")).toBe(1);
+    expect(columnsOf(sqlite, "lectures")).not.toContain("committed_at");
+  } finally {
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

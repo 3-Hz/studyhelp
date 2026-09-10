@@ -1,0 +1,1 @@
+ALTER TABLE `lectures` DROP COLUMN `committed_at`;

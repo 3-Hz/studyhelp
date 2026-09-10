@@ -3,8 +3,9 @@ import type { Score } from "@/lib/db/schema";
 import type { ItemCandidate, LoCandidate } from "./select";
 
 /**
- * Everything the daily session could ask about: one candidate per objective
- * on a committed lecture, carrying its dashboard scores and its concepts.
+ * Everything the daily session could ask about: one candidate per objective,
+ * carrying its dashboard scores and its concepts. Objectives exist only once
+ * a lecture has been extracted, so there is no lecture-level gate.
  *
  * Read as whole tables and assembled here rather than joined in SQL: this is
  * one student's local file, a few hundred rows at most, and the shape the
@@ -12,13 +13,9 @@ import type { ItemCandidate, LoCandidate } from "./select";
  * beneath it — is clearer in TypeScript than in a query.
  */
 export async function dailyCandidates(): Promise<LoCandidate[]> {
-  const lectures = await db.query.lectures.findMany();
-  const committed = new Map(
-    lectures.filter((lecture) => lecture.committedAt).map((l) => [l.id, l]),
-  );
-  if (committed.size === 0) return [];
-
   const objectives = await db.query.learningObjectives.findMany();
+  if (objectives.length === 0) return [];
+
   const items = await db.query.reviewItems.findMany();
   const performances = await db.query.performances.findMany();
   const studyDates = await db.query.studyDates.findMany();
@@ -39,9 +36,8 @@ export async function dailyCandidates(): Promise<LoCandidate[]> {
 
   const itemsByLo = new Map<number, ItemCandidate[]>();
   for (const item of [...items].sort((a, b) => a.ordinal - b.ordinal || a.id - b.id)) {
-    // A suspended concept is not something the session could ask about, any
-    // more than an uncommitted lecture is; an objective left with no items
-    // drops out through isEligible.
+    // A suspended concept is not something the session could ask about; an
+    // objective left with no items drops out through isEligible.
     if (item.suspended) continue;
     const list = itemsByLo.get(item.loId) ?? [];
     list.push({
@@ -57,22 +53,11 @@ export async function dailyCandidates(): Promise<LoCandidate[]> {
     itemsByLo.set(item.loId, list);
   }
 
-  const candidates: LoCandidate[] = [];
-
-  for (const objective of objectives) {
-    const lecture = committed.get(objective.lectureId);
-    // Objectives only reach the dashboard on commit, so an uncommitted
-    // lecture has nothing to practise.
-    if (!lecture?.committedAt) continue;
-
-    candidates.push({
-      loId: objective.id,
-      lectureId: lecture.id,
-      suspended: objective.suspended,
-      scores: scoresByLo.get(objective.id) ?? [],
-      items: itemsByLo.get(objective.id) ?? [],
-    });
-  }
-
-  return candidates;
+  return objectives.map((objective) => ({
+    loId: objective.id,
+    lectureId: objective.lectureId,
+    suspended: objective.suspended,
+    scores: scoresByLo.get(objective.id) ?? [],
+    items: itemsByLo.get(objective.id) ?? [],
+  }));
 }

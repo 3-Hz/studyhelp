@@ -146,7 +146,7 @@ test("extractLecture stores the files, reads the whole lecture with what it hold
   // The student's title stands; the model's is never written over it.
   expect(lecture.title).toBe("Amyloidosis");
   expect(lecture.extractedAt).not.toBeNull();
-  expect((lecture.draftExtract as LectureExtract).concepts).toHaveLength(2);
+  expect((lecture.lastExtract as LectureExtract).concepts).toHaveLength(2);
   const sources = await db.query.lectureSources.findMany({
     where: eq(schema.lectureSources.lectureId, lectureId),
   });

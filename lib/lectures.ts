@@ -4,7 +4,6 @@ import { db, schema } from "@/lib/db";
 export interface LectureSummary {
   id: number;
   title: string;
-  committedAt: Date | null;
   createdAt: Date;
   objectiveCount: number;
   conceptCount: number;
@@ -27,7 +26,6 @@ export async function listLectures(): Promise<LectureSummary[]> {
     .select({
       id: schema.lectures.id,
       title: schema.lectures.title,
-      committedAt: schema.lectures.committedAt,
       createdAt: schema.lectures.createdAt,
     })
     .from(schema.lectures)

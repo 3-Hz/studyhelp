@@ -49,7 +49,7 @@ export default async function LecturePage({
   }));
 
   const view = (await lectureConcepts(lectureId))!;
-  const lastExtract = lecture.draftExtract as LectureExtract | null;
+  const lastExtract = lecture.lastExtract as LectureExtract | null;
   const meta = lecture.extractionMeta as ExtractionMeta | null;
   const warnings = (lecture.extractionWarnings as string[] | null) ?? [];
   const extractedOn = lecture.extractedAt?.toISOString().slice(0, 10) ?? null;

@@ -41,7 +41,6 @@ export interface ObjectiveConcepts {
 export interface LectureConcepts {
   id: number;
   title: string;
-  committedAt: Date | null;
   /** Every date on which any of the lecture's concepts was marked, ascending. */
   dates: string[];
   objectives: ObjectiveConcepts[];
@@ -153,7 +152,6 @@ export async function lectureConcepts(
   return {
     id: lecture.id,
     title: lecture.title,
-    committedAt: lecture.committedAt,
     dates: [...dateById.values()].sort(),
     objectives: objectives.map((objective) => ({
       id: objective.id,

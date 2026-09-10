@@ -196,7 +196,7 @@ export function select(
     ),
   );
 
-  // Without a cap, one freshly committed lecture takes the whole session.
+  // Without a cap, one freshly extracted lecture takes the whole session.
   // The cap gives way only when nothing under it remains.
   const cap = Math.max(1, Math.ceil(los / 3));
   const picks: LoCandidate[] = [];

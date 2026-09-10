@@ -122,7 +122,7 @@ afterAll(() => {
 async function seedCommittedLecture(title: string = draft.title): Promise<number> {
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title, committedAt: new Date() })
+    .values({ title })
     .returning({ id: schema.lectures.id });
 
   await applyExtract(lecture.id, draft);
@@ -163,13 +163,26 @@ async function turnsOf(sessionId: number) {
   return attempts.map((a) => ({ stage: a.stage, loId: a.loId, reviewItemId: a.reviewItemId }));
 }
 
-test("refuses to study a lecture whose objectives were never committed", async () => {
+test("refuses a lecture with no objectives to review, naming it", async () => {
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: "Uncommitted", draftExtract: draft })
+    .values({ title: "Not yet extracted" })
     .returning({ id: schema.lectures.id });
 
-  await expect(startReviewSession([lecture.id])).rejects.toThrow(/commit/i);
+  await expect(startReviewSession([lecture.id])).rejects.toThrow(
+    /Not yet extracted.*nothing to review/,
+  );
+});
+
+test("refuses a lecture whose every concept is suspended: there is nothing to ask", async () => {
+  const lectureId = await seedCommittedLecture("All set aside");
+  const objectives = await objectivesOf(lectureId);
+  await db
+    .update(schema.reviewItems)
+    .set({ suspended: true })
+    .where(inArray(schema.reviewItems.loId, objectives.map((o) => o.id)));
+
+  await expect(startReviewSession([lectureId])).rejects.toThrow(/All set aside/);
 });
 
 test("rejoins an unfinished session rather than starting a second", async () => {
@@ -545,7 +558,7 @@ test("the tutor sees each objective's numbered concepts, its practice questions,
   expect(probe.allowedFormats).toEqual(["mechanism", "pathway", "consequence"]);
 });
 
-/** A committed lecture with `count` objectives of one concept each. */
+/** An extracted lecture with `count` objectives of one concept each. */
 async function seedLectureWith(title: string, count: number): Promise<number> {
   const wide = {
     title,
@@ -568,7 +581,7 @@ async function seedLectureWith(title: string, count: number): Promise<number> {
   };
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title, committedAt: new Date() })
+    .values({ title })
     .returning({ id: schema.lectures.id });
   await applyExtract(lecture.id, wide);
   return lecture.id;
@@ -578,14 +591,14 @@ test("refuses an empty set of lectures", async () => {
   await expect(startReviewSession([])).rejects.toThrow(/at least one/i);
 });
 
-test("refuses a set in which any lecture is uncommitted, naming it", async () => {
-  const committed = await seedCommittedLecture();
-  const [draftOnly] = await db
+test("refuses a set in which any lecture has nothing to review, naming it", async () => {
+  const ready = await seedCommittedLecture();
+  const [empty] = await db
     .insert(schema.lectures)
-    .values({ title: "Still a draft", draftExtract: draft })
+    .values({ title: "Still empty" })
     .returning({ id: schema.lectures.id });
 
-  await expect(startReviewSession([committed, draftOnly.id])).rejects.toThrow(/Still a draft/);
+  await expect(startReviewSession([ready, empty.id])).rejects.toThrow(/Still empty/);
 });
 
 test("a review of two lectures takes turns between them, every turn first-order", async () => {

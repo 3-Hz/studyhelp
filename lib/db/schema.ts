@@ -90,14 +90,17 @@ export const lectures = sqliteTable("lectures", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   title: text("title").notNull(),
   block: text("block"),
-  /** Raw model extraction, held as a draft until a human commits the LOs. */
-  draftExtract: text("draft_extract", { mode: "json" }),
+  /**
+   * The raw extraction most recently applied to the lecture's rows, kept for
+   * its conflicts and confusions and for debugging a bad read. The column
+   * name predates amends, when this was a draft awaiting commit.
+   */
+  lastExtract: text("draft_extract", { mode: "json" }),
   /** Which provider/model produced the draft, and whether it was chunked. */
   extractionMeta: text("extraction_meta", { mode: "json" }),
   /** Capability shortfalls hit during ingest (PDF read as text, images skipped). */
   extractionWarnings: text("extraction_warnings", { mode: "json" }),
   extractedAt: integer("extracted_at", { mode: "timestamp" }),
-  committedAt: integer("committed_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(now),

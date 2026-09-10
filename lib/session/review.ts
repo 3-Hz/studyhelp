@@ -25,7 +25,8 @@ function sameSet(a: number[], b: number[]): boolean {
 
 /**
  * A review of one or more lectures, chosen ad hoc (new_prompt.txt "Review
- * Quiz Session"): every id must name a committed lecture.
+ * Quiz Session"): every id must name a lecture with something to ask, an
+ * unsuspended objective with an unsuspended concept under it.
  */
 export async function startReviewSession(
   lectureIds: number[],
@@ -39,12 +40,36 @@ export async function startReviewSession(
     where: inArray(schema.lectures.id, chosen),
   });
   const byId = new Map(lectures.map((lecture) => [lecture.id, lecture]));
+
+  const objectives = await db.query.learningObjectives.findMany({
+    where: and(
+      inArray(schema.learningObjectives.lectureId, chosen),
+      eq(schema.learningObjectives.suspended, false),
+    ),
+  });
+  const items =
+    objectives.length === 0
+      ? []
+      : await db.query.reviewItems.findMany({
+          where: and(
+            inArray(
+              schema.reviewItems.loId,
+              objectives.map((objective) => objective.id),
+            ),
+            eq(schema.reviewItems.suspended, false),
+          ),
+        });
+  const askable = new Set(items.map((item) => item.loId));
+  const ready = new Set(
+    objectives.filter((objective) => askable.has(objective.id)).map((o) => o.lectureId),
+  );
+
   for (const id of chosen) {
     const lecture = byId.get(id);
     if (!lecture) throw new Error(`Lecture ${id} not found.`);
-    if (!lecture.committedAt) {
+    if (!ready.has(id)) {
       throw new Error(
-        `Review the objectives of "${lecture.title}" and commit them before studying it.`,
+        `"${lecture.title}" has nothing to review yet: extract its objectives first, or reactivate a suspended one.`,
       );
     }
   }

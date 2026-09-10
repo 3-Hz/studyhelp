@@ -13,12 +13,12 @@ beforeAll(async () => {
 
   const [first] = await db
     .insert(schema.lectures)
-    .values({ title: "Amyloidosis", committedAt: new Date() })
+    .values({ title: "Amyloidosis" })
     .returning({ id: schema.lectures.id });
 
   const [second] = await db
     .insert(schema.lectures)
-    .values({ title: "Uncommitted draft" })
+    .values({ title: "Not yet extracted" })
     .returning({ id: schema.lectures.id });
 
   // Four objectives on the first lecture, none on the second.
@@ -34,7 +34,7 @@ beforeAll(async () => {
   // accidentally constant across rows.
   const [third] = await db
     .insert(schema.lectures)
-    .values({ title: "One objective", committedAt: new Date() })
+    .values({ title: "One objective" })
     .returning({ id: schema.lectures.id });
   await db
     .insert(schema.learningObjectives)
@@ -58,7 +58,7 @@ test("counts objectives per lecture independently", async () => {
 
   expect(byTitle.get("Amyloidosis")).toBe(4);
   expect(byTitle.get("One objective")).toBe(1);
-  expect(byTitle.get("Uncommitted draft")).toBe(0);
+  expect(byTitle.get("Not yet extracted")).toBe(0);
 });
 
 test("counts are not identical across lectures", async () => {
@@ -75,13 +75,6 @@ test("orders newest first", async () => {
   const lectures = await listLectures();
   const times = lectures.map((l) => l.createdAt.getTime());
   expect([...times].sort((a, b) => b - a)).toEqual(times);
-});
-
-test("distinguishes committed lectures from drafts", async () => {
-  const lectures = await listLectures();
-  const draft = lectures.find((l) => l.title === "Uncommitted draft");
-  expect(draft?.committedAt).toBeNull();
-  expect(lectures.find((l) => l.title === "Amyloidosis")?.committedAt).not.toBeNull();
 });
 
 test("counts each lecture's concepts and files, so the list can say where it stands", async () => {

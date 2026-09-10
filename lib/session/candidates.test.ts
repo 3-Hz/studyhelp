@@ -39,19 +39,19 @@ afterAll(() => {
   }
 });
 
-test("an uncommitted lecture contributes no candidates", async () => {
-  await db.insert(schema.lectures).values({ title: "Draft only", draftExtract: draft });
+test("a lecture with no objectives contributes no candidates", async () => {
+  await db.insert(schema.lectures).values({ title: "Not yet extracted" });
 
   expect(await dailyCandidates()).toEqual([]);
 });
 
-test("a committed lecture contributes one candidate per objective, carrying its scores and its items", async () => {
+test("an extracted lecture contributes one candidate per objective, carrying its scores and its items", async () => {
   // Push the objective ids past the review-item ids. Both are first-row
   // autoincrements otherwise, so loId and reviewItemId would coincide and a
   // swap between them would pass unnoticed.
   const [filler] = await db
     .insert(schema.lectures)
-    .values({ title: "Filler, never committed" })
+    .values({ title: "Filler, objectives without concepts" })
     .returning({ id: schema.lectures.id });
 
   await db.insert(schema.learningObjectives).values([
@@ -62,7 +62,7 @@ test("a committed lecture contributes one candidate per objective, carrying its 
 
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: draft.title, block: "Renal", committedAt: new Date() })
+    .values({ title: draft.title, block: "Renal" })
     .returning({ id: schema.lectures.id });
 
   await applyExtract(lecture.id, draft);
@@ -111,7 +111,11 @@ test("a committed lecture contributes one candidate per objective, carrying its 
     where: eq(schema.reviewItems.loId, objective!.id),
   });
 
-  const candidates = await dailyCandidates();
+  // The filler's objectives are candidates too, with no items; isEligible
+  // keeps them out of a session. Only this lecture's is checked here.
+  const candidates = (await dailyCandidates()).filter(
+    (candidate) => candidate.lectureId === lecture.id,
+  );
 
   expect(candidates).toHaveLength(1);
 
@@ -153,7 +157,7 @@ test("a suspended concept is not a candidate, and an objective with none left is
   };
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: "Two concepts", committedAt: new Date() })
+    .values({ title: "Two concepts" })
     .returning({ id: schema.lectures.id });
   await applyExtract(lecture.id, twoConcepts);
 

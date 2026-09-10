@@ -16,7 +16,7 @@ import { allowedFormats, select, type PlannedSlot } from "./select";
 
 /**
  * Daily interleaved practice: a budget's worth of objectives across every
- * committed lecture, one to three questions on each, chosen by select() and
+ * extracted lecture, one to three questions on each, chosen by select() and
  * frozen on the session row.
  *
  * Unlike a review, this tests concepts rather than objectives —
@@ -64,7 +64,7 @@ export async function startDailySession(
   const plan = select(await dailyCandidates(), { today: todayIso(now), ...dailyBudget(minutes) });
   if (plan.length === 0) {
     throw new Error(
-      "Nothing to practise yet. Commit a lecture's objectives, or reactivate a suspended one.",
+      "Nothing to practise yet. Extract a lecture's objectives, or reactivate a suspended one.",
     );
   }
 

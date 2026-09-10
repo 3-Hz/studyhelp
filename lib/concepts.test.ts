@@ -61,16 +61,16 @@ beforeAll(async () => {
 
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: draft.title, committedAt: new Date() })
+    .values({ title: draft.title })
     .returning({ id: schema.lectures.id });
   lectureId = lecture.id;
   await applyExtract(lectureId, draft);
 
-  const [uncommitted] = await db
+  const [unextracted] = await db
     .insert(schema.lectures)
-    .values({ title: "Draft only", draftExtract: draft })
+    .values({ title: "Not yet extracted" })
     .returning({ id: schema.lectures.id });
-  draftId = uncommitted.id;
+  draftId = unextracted.id;
 
   const objectives = await db.query.learningObjectives.findMany({
     where: eq(schema.learningObjectives.lectureId, lectureId),
@@ -105,7 +105,6 @@ test("lists every objective in order with its items, suspended ones included", a
   const view = await lectureConcepts(lectureId, TODAY);
 
   expect(view?.title).toBe("Amyloidosis");
-  expect(view?.committedAt).not.toBeNull();
   expect(view?.objectives.map((o) => o.text)).toEqual([
     "Describe the structure of amyloid fibrils.",
     "Compare AL and ATTR amyloidosis.",
@@ -170,9 +169,9 @@ test("each item carries its marks by date, and the lecture lists the dates it wa
   expect(view!.objectives[1].items[0].marks).toEqual({});
 });
 
-test("an uncommitted lecture has no objectives yet", async () => {
+test("a lecture with nothing extracted has no objectives yet", async () => {
   const view = await lectureConcepts(draftId, TODAY);
-  expect(view?.committedAt).toBeNull();
+  expect(view?.title).toBe("Not yet extracted");
   expect(view?.objectives).toEqual([]);
 });
 
@@ -239,7 +238,7 @@ test("the LO Map says which of the lecture's practice questions test each concep
   });
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: "Linked", committedAt: new Date() })
+    .values({ title: "Linked" })
     .returning({ id: schema.lectures.id });
   await applyExtract(lecture.id, linked);
 
@@ -268,7 +267,7 @@ test("each concept carries its label and the lecturer's cue, for the badge", asy
   });
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: "Cued", committedAt: new Date() })
+    .values({ title: "Cued" })
     .returning({ id: schema.lectures.id });
   await applyExtract(lecture.id, cued);
 

@@ -24,7 +24,7 @@ export default async function ConceptsPage({
   const view = await lectureConcepts(lectureId);
   if (!view) notFound();
 
-  if (!view.committedAt) {
+  if (view.objectives.length === 0) {
     return (
       <div className="max-w-2xl">
         <h1 className="text-2xl font-semibold tracking-tight">{view.title}</h1>
