@@ -79,8 +79,8 @@ hosted aggregators like OpenRouter.
 ### What degrades on a local model
 
 The app declares each model's capabilities and adapts rather than assuming. On
-a small local model you still get a usable draft, but three things change — and
-each one is reported on the review screen, so a degraded draft never looks like
+a small local model you still get a usable read, but three things change — and
+each one is reported on the lecture page, so a degraded read never looks like
 a full-fidelity one:
 
 | Capability | Without it |
@@ -169,33 +169,44 @@ sized to the real window comes back rate-limited rather than served.
 
 **Phase 1 (lecture ingest → learning objectives) is implemented.**
 
-Upload a `.pptx`, `.pdf`, transcript (`.txt` / `.vtt` / `.srt`), and/or images for
-one lecture. Slides and transcripts are parsed locally; PDFs and images go to the
-Files API and are read by the model natively. Extraction returns a **draft** —
-nothing reaches the dashboard until you approve it on the review screen, because
-objective wording is preserved verbatim and worth checking.
+Add a lecture by title, then give it its files: a `.pptx`, `.pdf`, transcript
+(`.txt` / `.vtt` / `.srt`), and/or images. Slides and transcripts are parsed
+locally; PDFs and images go to the Files API and are read by the model
+natively. Extract reads everything the lecture holds and writes its objectives
+and numbered concepts straight to the dashboard. The lecture page is where you
+check them — objective wording is preserved verbatim on purpose — and suspend
+what should not be quizzed; nothing is deleted.
 
 Extraction also reads the lecturer's cues — "you need to know this", "I won't
 test you on this" — in the transcript and the presenter notes. A concept the
 lecturer stressed is always extracted; one they set aside is extracted, flagged
-with the cue quoted, and starts unticked on the review screen. Every concept has
-a tick box there. An unticked concept is committed suspended: it keeps its number
-on the LO Map, is never quizzed, and can be reactivated from there.
+with the cue quoted, and starts suspended: it keeps its number on the LO Map,
+is never quizzed, and can be reactivated from the lecture page or the LO Map.
 
 The upload takes four kinds of material in their own boxes — the slide deck,
 the lecture transcript, the practice quiz, and additional materials such as
 handouts and figures — and each reaches the model headed by what it is, since a
 quiz PDF and a lecture PDF are the same file type. Every concept a practice
 question tests is extracted under its objective and marked *practice quiz* on
-the review screen and *quiz* on the LO Map, and the tutor is told which
-numbered concept each question tests. Concepts from the additional materials
-are taught material, under the lecturer's cues like anything else; a cue
-still decides whether a quiz-tested concept starts ticked.
+the lecture page and the LO Map, and the tutor is told which numbered concept
+each question tests. Concepts from the additional materials are taught
+material, under the lecturer's cues like anything else; a cue still decides
+whether a quiz-tested concept starts suspended.
+
+A lecture is never finished at upload. Add the transcript, the practice quiz
+or a handout whenever it arrives and press **Amend**: every read covers
+everything the lecture holds, and the model is shown the objectives and
+concept labels already recorded so it reuses their wording. The result is
+fitted onto the existing rows — a match keeps its id, number, ladder state,
+marks and suspension; what is new appends with the next number; nothing is
+deleted or renumbered. A label the model rewords becomes a second row to
+suspend, never a merge of two histories. Amend with no new files re-reads the
+stored ones, which is how a lecture is re-run on a better model.
 
 **Phase 2 (review of chosen lectures) is implemented.**
 
-Tick one or more committed lectures on the lecture list, say how long you
-have, and the review walks their objectives one at a time, first-order only,
+Tick one or more lectures on the lecture list, say how long you have, and
+the review walks their objectives one at a time, first-order only,
 switching lectures between objectives: recall each objective from memory,
 then answer a probe on each concept the recall left untested or short. Each
 answer is scored 1–5 against the rubric, with a mark for every concept it
@@ -207,11 +218,13 @@ allowed to grade its way past it. A day's dashboard cell is the *lowest* score
 the objective earned that sitting, since a 5 that follows a 2 is recall of the
 correction just given. Objectives never tested stay blank, and finishing moves
 each marked concept on the 0 / 1 / 3 / 7 / 14 / 30 / 60 day ladder and leaves
-the unmarked ones alone.
+the unmarked ones alone. A review you leave is listed at the top of the
+Lectures tab, any day, with Resume and Finish now; finishing records what was
+graded on the day it is pressed.
 
 **Phase 3 (daily sessions interleaved across lectures) is implemented.**
 
-Each day's session covers objectives from every committed lecture — the ones
+Each day's session covers objectives from every extracted lecture — the ones
 whose concepts are most overdue first, a weaker dashboard history breaking
 ties, at most a third from any one lecture — with one to three questions on
 each, alternating lectures between objectives and never combining them.
@@ -250,7 +263,7 @@ session prefers one when it fits.
 
 **Phase 6 (the study workflow as the new prompt describes it) is implemented.**
 
-A review is ad hoc: any set of committed lectures, any day, in one session
+A review is ad hoc: any set of extracted lectures, any day, in one session
 that shares the budget between them and lets the lectures take turns. The
 repetition quiz chooses objectives by one ranking read off the concept
 ladder and the dashboard — most overdue first, weaker history breaking
@@ -269,7 +282,7 @@ not even then.
 
 ```
 app/
-  api/lectures/             ingest + commit endpoints
+  api/lectures/             create a lecture; add files and extract
   api/objectives/           suspend/reactivate an objective
   api/review-items/         suspend/reactivate a concept
   api/sessions/             start, turn, answer, hint, finish
@@ -278,9 +291,8 @@ app/
   components/MaterialInputs the four upload boxes: deck, transcript, quiz, additional
   components/ReviewPicker   the lecture list with a box per lecture and the start bar
   dashboard/                the LO grid: one 1–5 score per objective per day
-  import/                   upload, one box per kind of material
-  lectures/                 the lecture list: tick lectures to review
-  lectures/[id]/review/     draft review before commit
+  lectures/                 the lecture list: unfinished reviews, tick lectures to review, add a lecture
+  lectures/[id]/            the lecture page: files, Extract or Amend, objectives and their concepts
   lectures/[id]/concepts/   the LO Map: numbered concepts, their state, their marks by date
   practice/                 the daily-practice landing screen
   sessions/[id]/            the study session
@@ -300,11 +312,13 @@ lib/
   ingest/documents.ts       PDF/image parts, with local text fallback
   ingest/storeSources.ts    uploads → source rows, assets, bytes on disk
   ingest/buildExtractInput.ts  a lecture's files → one model input
-  ingest/ingestLecture.ts   first upload, later additions, re-extraction
+  ingest/ingestLecture.ts   create a lecture; store files and extract
   extract/index.ts          single vs chunked orchestration
   extract/chunk.ts          splitting a lecture to fit the context window
   extract/merge.ts          deterministic merge of chunked extractions
-  commitLecture.ts          draft → dashboard rows, numbered review items, practice questions
+  extract/prior.ts          what the lecture already holds, shown to the model before a read
+  reconcile.ts              fitting an extraction onto existing rows: match by wording, append the rest
+  applyExtract.ts           writing that fit: objectives, numbered concepts, practice questions
   concepts.ts               the LO Map's data: objectives, numbered items, marks by date
   tutor/schema.ts           question, grade and hint contracts
   tutor/index.ts            asking, grading and cueing
@@ -312,6 +326,7 @@ lib/
   session/kind.ts           the shared session-kind interface
   session/plan.ts           the review's running order across its lectures, as a pure function
   session/review.ts         the review: recall, then probes, lectures taking turns
+  session/openReviews.ts    unfinished reviews, for Resume and Finish now
   session/candidates.ts     every objective the daily session could cover, with its items
   session/select.ts         ranking the day's objectives and choosing their questions, as a pure function
   session/daily.ts          the daily session; interleaved across every lecture
