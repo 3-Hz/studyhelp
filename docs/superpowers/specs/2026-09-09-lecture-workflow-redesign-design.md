@@ -237,6 +237,29 @@ Tasks 3 and 4 are independent once 2 is in; 7 and 8 once 6 is in.
    answer once, resume it from the Lectures tab, finish it, and see the
    score on the dashboard.
 
-## Results
+## Results (2026-09-09)
 
-Filled in after verification.
+End to end on the worktree's dev server with the synthetic fixture, the
+extraction on `qwen3:8b` because Gemini was throttled that evening:
+
+- Add lecture opened an empty lecture page. Extract over the deck and
+  transcript wrote 4 objectives, 12 concepts and 1 practice question, in
+  two merged sections.
+- Amend with the quiz deck and handout matched all 4 objectives and 9
+  concepts, appended 3 concepts with the next numbers under their
+  objectives, added the 2 quiz questions with their links, and gave the
+  earlier question a link it had lacked. Every earlier id and ordinal was
+  unchanged; nothing was refreshed or removed.
+- Suspend and Reactivate worked on an objective and a concept from the
+  lecture page; the LO Map agreed and showed no Due column.
+- A 10-minute review started from the picker; one answer graded 5 through
+  the API; the Lectures tab listed it with "1 answered" beside the open
+  session from 2026-09-02; Resume reopened it mid-question; Finish now
+  closed it, and the dashboard showed the 5 on the day's column.
+- Migrations 0011 and 0012 on a copy of the real database backfilled every
+  label, left emphasis neutral, dropped `committed_at`, and kept every
+  row, including the open session.
+
+The 8B model stretched the lecturer's opening cue over most concepts and
+found no set-aside cue, so the suspended-by-default path rests on the
+unit tests. `bun test`: 361 pass; typecheck and the production build clean.
