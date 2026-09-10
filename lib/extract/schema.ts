@@ -1,12 +1,8 @@
 import * as z from "zod";
+import { CONCEPT_EMPHASIS } from "@/lib/db/schema";
 
-/**
- * How the lecturer weighted a concept, read off cues in the transcript and
- * the presenter notes. A draft-time signal only: it decides whether a concept
- * starts ticked on the review screen, and is not stored past commit.
- */
-export const CONCEPT_EMPHASIS = ["emphasized", "neutral", "deemphasized"] as const;
-export type ConceptEmphasis = (typeof CONCEPT_EMPHASIS)[number];
+export { CONCEPT_EMPHASIS } from "@/lib/db/schema";
+export type { ConceptEmphasis } from "@/lib/db/schema";
 
 /**
  * The extraction contract. Provider-neutral by construction — it carried over

@@ -428,3 +428,41 @@ test("0010 lets a practice question name its concepts, and leaves old rows unnam
     { question: "Which precursor?", review_item_ids: "[3,4]" },
   ]);
 });
+
+// --- 0011: a concept keeps its label and the lecturer's emphasis ---
+
+const LABELS = files.find((file) => file.startsWith("0011_"));
+const BEFORE_LABELS = files.filter((file) => file < "0011_");
+
+function freshBeforeLabels(): Database {
+  const sqlite = new Database(":memory:");
+  for (const file of BEFORE_LABELS) apply(sqlite, file);
+  sqlite.exec("INSERT INTO lectures (title) VALUES ('Amyloidosis')");
+  sqlite.exec(
+    "INSERT INTO learning_objectives (lecture_id, text, order_index) VALUES (1, 'Describe fibrils.', 0)",
+  );
+  return sqlite;
+}
+
+test("0011 backfills each concept's label from the text before its first em dash", () => {
+  expect(LABELS).toBeDefined();
+  const sqlite = freshBeforeLabels();
+  sqlite.exec(
+    "INSERT INTO review_items (lo_id, concept, kind, due_on) VALUES " +
+      "(1, 'Congo red — Apple-green birefringence under polarised light.', 'fact', '2026-09-09'), " +
+      "(1, 'Tafamidis', 'fact', '2026-09-09'), " +
+      "(1, 'A — B — C', 'fact', '2026-09-09')",
+  );
+
+  apply(sqlite, LABELS!);
+
+  const rows = sqlite
+    .prepare("SELECT label, emphasis, emphasis_cue FROM review_items ORDER BY id")
+    .all() as { label: string; emphasis: string; emphasis_cue: string }[];
+  expect(rows).toEqual([
+    { label: "Congo red", emphasis: "neutral", emphasis_cue: "" },
+    // A concept with no detail is its own label.
+    { label: "Tafamidis", emphasis: "neutral", emphasis_cue: "" },
+    { label: "A", emphasis: "neutral", emphasis_cue: "" },
+  ]);
+});

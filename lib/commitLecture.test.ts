@@ -459,3 +459,17 @@ test("a draft from before the link existed commits its questions unlinked", asyn
   expect(congoRed.reviewItemIds).toBeNull();
   expect(precursor.reviewItemIds).toBeNull();
 });
+
+test("commit keeps each concept's label and the lecturer's cue on its row", async () => {
+  const lectureId = await seedCuedLecture();
+  await commitLecture(lectureId, [
+    { draftIndex: 0, text: draft.learningObjectives[0].text },
+  ]);
+
+  const items = await itemsUnderFirstObjective(lectureId);
+  expect(items.map((item) => [item.label, item.emphasis, item.emphasisCue])).toEqual([
+    ["Beta-pleated sheet", "neutral", ""],
+    ["Fibril diameter", "deemphasized", "You do not need to memorise the diameter."],
+    ["Congo red", "emphasized", "This comes up every year."],
+  ]);
+});

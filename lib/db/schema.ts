@@ -36,6 +36,14 @@ export const PROVENANCE = ["taught", "derived", "supplemental"] as const;
 export type Provenance = (typeof PROVENANCE)[number];
 
 /**
+ * How the lecturer weighted a concept, read off cues in the transcript and
+ * the presenter notes. Kept on the review item: it decides whether a new
+ * concept starts suspended, and the lecture page shows it with the cue.
+ */
+export const CONCEPT_EMPHASIS = ["emphasized", "neutral", "deemphasized"] as const;
+export type ConceptEmphasis = (typeof CONCEPT_EMPHASIS)[number];
+
+/**
  * What a concept is, which decides the shape of question it gets. The five
  * kinds of idea new_prompt.txt counts: terms and facts, mechanisms,
  * relationships, distinctions, clinical applications.
@@ -226,6 +234,17 @@ export const reviewItems = sqliteTable(
       .notNull()
       .references(() => learningObjectives.id, { onDelete: "cascade" }),
     concept: text("concept").notNull(),
+    /**
+     * The extract's short name for the concept: the key an amend matches on,
+     * so a re-extraction finds this row instead of adding a second. `concept`
+     * is the label with the detail after an em dash.
+     */
+    label: text("label").notNull().default(""),
+    emphasis: text("emphasis", { enum: CONCEPT_EMPHASIS })
+      .notNull()
+      .default("neutral"),
+    /** The lecturer's words behind the emphasis; empty when neutral. */
+    emphasisCue: text("emphasis_cue").notNull().default(""),
     /**
      * The concept's number within its objective, 1-based, in the order the
      * lecture presented it: column F of the new prompt's LO Map, and the
