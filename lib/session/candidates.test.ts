@@ -6,7 +6,7 @@ const TEST_DB = `./.test-candidates-${process.pid}.db`;
 process.env.DATABASE_URL = TEST_DB;
 
 const { db, schema } = await import("../db");
-const { commitLecture } = await import("../commitLecture");
+const { applyExtract } = await import("../applyExtract");
 const { dailyCandidates } = await import("./candidates");
 const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
 
@@ -19,9 +19,12 @@ const draft = {
       detail: "Cross-beta conformation.",
       kind: "fact" as const,
       provenance: "taught" as const,
+      emphasis: "neutral" as const,
+      emphasisCue: "",
       relatedObjectiveIndexes: [0],
     },
   ],
+  practiceQuestions: [],
   commonConfusions: [],
   conflicts: [],
 };
@@ -59,10 +62,10 @@ test("a committed lecture contributes one candidate per objective, carrying its 
 
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: draft.title, block: "Renal", draftExtract: draft })
+    .values({ title: draft.title, block: "Renal", committedAt: new Date() })
     .returning({ id: schema.lectures.id });
 
-  await commitLecture(lecture.id, [{ draftIndex: 0, text: draft.learningObjectives[0].text }]);
+  await applyExtract(lecture.id, draft);
 
   const objective = await db.query.learningObjectives.findFirst({
     where: eq(schema.learningObjectives.lectureId, lecture.id),
@@ -77,7 +80,7 @@ test("a committed lecture contributes one candidate per objective, carrying its 
     .values({ date: "2026-09-02" })
     .returning({ id: schema.studyDates.id });
 
-  // Distinct values per field: with commitLecture's defaults, intervalDays
+  // Distinct values per field: with applyExtract's defaults, intervalDays
   // and lapses are both 0, so a crossed mapping between them would pass
   // unnoticed.
   await db
@@ -150,9 +153,9 @@ test("a suspended concept is not a candidate, and an objective with none left is
   };
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: "Two concepts", draftExtract: twoConcepts })
+    .values({ title: "Two concepts", committedAt: new Date() })
     .returning({ id: schema.lectures.id });
-  await commitLecture(lecture.id, [{ draftIndex: 0, text: draft.learningObjectives[0].text }]);
+  await applyExtract(lecture.id, twoConcepts);
 
   const objective = await db.query.learningObjectives.findFirst({
     where: eq(schema.learningObjectives.lectureId, lecture.id),

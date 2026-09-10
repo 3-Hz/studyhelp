@@ -6,7 +6,7 @@ const TEST_DB = `./.test-prior-${process.pid}.db`;
 process.env.DATABASE_URL = TEST_DB;
 
 const { db, schema } = await import("../db");
-const { commitLecture } = await import("../commitLecture");
+const { applyExtract } = await import("../applyExtract");
 const { addDays, todayIso } = await import("../schedule");
 const { priorAttempts } = await import("./prior");
 const { startDailySession } = await import("./daily");
@@ -27,9 +27,12 @@ const draft = {
       detail: "Light chains versus transthyretin.",
       kind: "mechanism" as const,
       provenance: "taught" as const,
+      emphasis: "neutral" as const,
+      emphasisCue: "",
       relatedObjectiveIndexes: [0],
     },
   ],
+  practiceQuestions: [],
   commonConfusions: [],
   conflicts: [],
 };
@@ -78,10 +81,10 @@ beforeAll(async () => {
   migrate(db, { migrationsFolder: "./drizzle" });
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: draft.title, draftExtract: draft })
+    .values({ title: draft.title, committedAt: new Date() })
     .returning({ id: schema.lectures.id });
   lectureId = lecture.id;
-  await commitLecture(lectureId, [{ draftIndex: 0, text: draft.learningObjectives[0].text }]);
+  await applyExtract(lectureId, draft);
 
   const item = await db.query.reviewItems.findFirst();
   slots = [{ reviewItemId: item!.id, loId: item!.loId }];

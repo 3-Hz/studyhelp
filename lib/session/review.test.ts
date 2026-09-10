@@ -7,7 +7,7 @@ process.env.DATABASE_URL = TEST_DB;
 
 // Imported after DATABASE_URL is set, since the db module reads it on load.
 const { db, schema } = await import("../db");
-const { commitLecture } = await import("../commitLecture");
+const { applyExtract } = await import("../applyExtract");
 const { addDays, todayIso } = await import("../schedule");
 const { startReviewSession } = await import("./review");
 const {
@@ -37,6 +37,8 @@ const draft = {
       detail: "Amyloid fibrils adopt a cross-beta sheet conformation.",
       kind: "fact" as const,
       provenance: "taught" as const,
+      emphasis: "neutral" as const,
+      emphasisCue: "",
       relatedObjectiveIndexes: [0],
     },
     {
@@ -44,6 +46,8 @@ const draft = {
       detail: "AL derives from light chains; ATTR from transthyretin.",
       kind: "mechanism" as const,
       provenance: "taught" as const,
+      emphasis: "neutral" as const,
+      emphasisCue: "",
       relatedObjectiveIndexes: [1],
     },
     {
@@ -51,6 +55,8 @@ const draft = {
       detail: "AL takes kidney and heart together; wild-type ATTR is mostly cardiac.",
       kind: "distinction" as const,
       provenance: "taught" as const,
+      emphasis: "neutral" as const,
+      emphasisCue: "",
       relatedObjectiveIndexes: [1],
     },
   ],
@@ -116,13 +122,10 @@ afterAll(() => {
 async function seedCommittedLecture(title: string = draft.title): Promise<number> {
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title, draftExtract: draft })
+    .values({ title, committedAt: new Date() })
     .returning({ id: schema.lectures.id });
 
-  await commitLecture(lecture.id, [
-    { draftIndex: 0, text: draft.learningObjectives[0].text },
-    { draftIndex: 1, text: draft.learningObjectives[1].text },
-  ]);
+  await applyExtract(lecture.id, draft);
 
   return lecture.id;
 }
@@ -555,6 +558,8 @@ async function seedLectureWith(title: string, count: number): Promise<number> {
       detail: `Detail ${i + 1}.`,
       kind: "fact" as const,
       provenance: "taught" as const,
+      emphasis: "neutral" as const,
+      emphasisCue: "",
       relatedObjectiveIndexes: [i],
     })),
     practiceQuestions: [],
@@ -563,12 +568,9 @@ async function seedLectureWith(title: string, count: number): Promise<number> {
   };
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title, draftExtract: wide })
+    .values({ title, committedAt: new Date() })
     .returning({ id: schema.lectures.id });
-  await commitLecture(
-    lecture.id,
-    wide.learningObjectives.map((objective, index) => ({ draftIndex: index, text: objective.text })),
-  );
+  await applyExtract(lecture.id, wide);
   return lecture.id;
 }
 

@@ -6,7 +6,7 @@ const TEST_DB = `./.test-daily-${process.pid}.db`;
 process.env.DATABASE_URL = TEST_DB;
 
 const { db, schema } = await import("../db");
-const { commitLecture } = await import("../commitLecture");
+const { applyExtract } = await import("../applyExtract");
 const { addDays, todayIso, tierOf } = await import("../schedule");
 const { startDailySession } = await import("./daily");
 const { startReviewSession } = await import("./review");
@@ -51,8 +51,11 @@ function draftFor(title: string, objectives: number) {
       // allowedFormats.
       kind: KINDS[Math.floor(i / 3) % 3],
       provenance: "taught" as const,
+      emphasis: "neutral" as const,
+      emphasisCue: "",
       relatedObjectiveIndexes: [Math.floor(i / 3)],
     })),
+    practiceQuestions: [],
     commonConfusions: [],
     conflicts: [],
   };
@@ -62,16 +65,10 @@ async function seedLecture(title: string, objectives: number, block: string) {
   const draft = draftFor(title, objectives);
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title, block, draftExtract: draft })
+    .values({ title, block, committedAt: new Date() })
     .returning({ id: schema.lectures.id });
 
-  await commitLecture(
-    lecture.id,
-    draft.learningObjectives.map((objective, index) => ({
-      draftIndex: index,
-      text: objective.text,
-    })),
-  );
+  await applyExtract(lecture.id, draft);
 
   return lecture.id;
 }
@@ -505,11 +502,9 @@ test("daily practice questions carry the numbers of the concepts they test", asy
   };
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: "Quizzed", draftExtract: linked })
+    .values({ title: "Quizzed", committedAt: new Date() })
     .returning({ id: schema.lectures.id });
-  await commitLecture(lecture.id, [
-    { draftIndex: 0, text: draft.learningObjectives[0].text },
-  ]);
+  await applyExtract(lecture.id, linked);
   const objective = (await db.query.learningObjectives.findFirst({
     where: eq(schema.learningObjectives.lectureId, lecture.id),
   }))!;

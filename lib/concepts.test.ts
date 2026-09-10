@@ -6,7 +6,8 @@ const TEST_DB = `./.test-concepts-${process.pid}.db`;
 process.env.DATABASE_URL = TEST_DB;
 
 const { db, schema } = await import("./db");
-const { commitLecture } = await import("./commitLecture");
+const { applyExtract } = await import("./applyExtract");
+const { extract } = await import("./extract/testUtils");
 const { lectureConcepts } = await import("./concepts");
 const { migrate } = await import("drizzle-orm/bun-sqlite/migrator");
 
@@ -24,6 +25,8 @@ const draft = {
       detail: "Cross-beta conformation.",
       kind: "fact" as const,
       provenance: "taught" as const,
+      emphasis: "neutral" as const,
+      emphasisCue: "",
       relatedObjectiveIndexes: [0],
     },
     {
@@ -31,6 +34,8 @@ const draft = {
       detail: "Apple-green birefringence.",
       kind: "fact" as const,
       provenance: "taught" as const,
+      emphasis: "neutral" as const,
+      emphasisCue: "",
       relatedObjectiveIndexes: [0],
     },
     {
@@ -38,9 +43,12 @@ const draft = {
       detail: "Light chains versus transthyretin.",
       kind: "mechanism" as const,
       provenance: "supplemental" as const,
+      emphasis: "neutral" as const,
+      emphasisCue: "",
       relatedObjectiveIndexes: [1],
     },
   ],
+  practiceQuestions: [],
   commonConfusions: [],
   conflicts: [],
 };
@@ -53,13 +61,10 @@ beforeAll(async () => {
 
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({ title: draft.title, draftExtract: draft })
+    .values({ title: draft.title, committedAt: new Date() })
     .returning({ id: schema.lectures.id });
   lectureId = lecture.id;
-  await commitLecture(lectureId, [
-    { draftIndex: 0, text: draft.learningObjectives[0].text },
-    { draftIndex: 1, text: draft.learningObjectives[1].text },
-  ]);
+  await applyExtract(lectureId, draft);
 
   const [uncommitted] = await db
     .insert(schema.lectures)
@@ -192,51 +197,51 @@ test("the LO Map says which concepts are suspended", async () => {
 });
 
 test("the LO Map says which of the lecture's practice questions test each concept", async () => {
+  const linked = extract({
+    title: "Linked",
+    learningObjectives: [{ text: "Explain Congo red staining.", slideRefs: [7] }],
+    concepts: [
+      {
+        label: "Congo red",
+        detail: "The confirmatory stain.",
+        kind: "fact",
+        provenance: "taught",
+        emphasis: "neutral",
+        emphasisCue: "",
+        relatedObjectiveIndexes: [0],
+      },
+      {
+        label: "Apple-green birefringence",
+        detail: "Under polarised light.",
+        kind: "fact",
+        provenance: "taught",
+        emphasis: "neutral",
+        emphasisCue: "",
+        relatedObjectiveIndexes: [0],
+      },
+    ],
+    practiceQuestions: [
+      {
+        question: "Which stain confirms amyloid, and what do you see?",
+        answer: "Congo red; apple-green birefringence.",
+        slideRefs: [8],
+        relatedObjectiveIndexes: [0],
+        conceptIndexes: [0, 1],
+      },
+      {
+        question: "What do you see under polarised light?",
+        answer: "Apple-green birefringence.",
+        slideRefs: [8],
+        relatedObjectiveIndexes: [0],
+        conceptIndexes: [1],
+      },
+    ],
+  });
   const [lecture] = await db
     .insert(schema.lectures)
-    .values({
-      title: "Linked",
-      draftExtract: {
-        title: "Linked",
-        learningObjectives: [{ text: "Explain Congo red staining.", slideRefs: [7] }],
-        concepts: [
-          {
-            label: "Congo red",
-            detail: "The confirmatory stain.",
-            kind: "fact",
-            provenance: "taught",
-            relatedObjectiveIndexes: [0],
-          },
-          {
-            label: "Apple-green birefringence",
-            detail: "Under polarised light.",
-            kind: "fact",
-            provenance: "taught",
-            relatedObjectiveIndexes: [0],
-          },
-        ],
-        practiceQuestions: [
-          {
-            question: "Which stain confirms amyloid, and what do you see?",
-            answer: "Congo red; apple-green birefringence.",
-            slideRefs: [8],
-            relatedObjectiveIndexes: [0],
-            conceptIndexes: [0, 1],
-          },
-          {
-            question: "What do you see under polarised light?",
-            answer: "Apple-green birefringence.",
-            slideRefs: [8],
-            relatedObjectiveIndexes: [0],
-            conceptIndexes: [1],
-          },
-        ],
-        commonConfusions: [],
-        conflicts: [],
-      },
-    })
+    .values({ title: "Linked", committedAt: new Date() })
     .returning({ id: schema.lectures.id });
-  await commitLecture(lecture.id, [{ draftIndex: 0, text: "Explain Congo red staining." }]);
+  await applyExtract(lecture.id, linked);
 
   const view = (await lectureConcepts(lecture.id, TODAY))!;
   expect(view.objectives[0].items.map((item) => item.practiceQuestions)).toEqual([

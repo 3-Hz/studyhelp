@@ -56,8 +56,15 @@ export async function applyExtract(
     where: eq(schema.practiceQuestions.lectureId, lectureId),
   });
 
+  // Stored drafts predate some fields; a missing list is an empty one.
+  const extracted = {
+    learningObjectives: extract.learningObjectives ?? [],
+    concepts: extract.concepts ?? [],
+    practiceQuestions: extract.practiceQuestions ?? [],
+  };
+
   // Objectives first: the concepts hang from their ids.
-  const objectivePlan = reconcileObjectives(objectives, extract.learningObjectives);
+  const objectivePlan = reconcileObjectives(objectives, extracted.learningObjectives);
   const loIdByExtractIndex = new Map(objectivePlan.matched);
   if (objectivePlan.inserts.length > 0) {
     const inserted = await db
@@ -88,7 +95,7 @@ export async function applyExtract(
       emphasis: item.emphasis,
       emphasisCue: item.emphasisCue,
     })),
-    extract.concepts,
+    extracted.concepts,
     loIdByExtractIndex,
     today,
   );
@@ -113,7 +120,7 @@ export async function applyExtract(
 
   const questionPlan = reconcileQuestions(
     questions,
-    extract.practiceQuestions,
+    extracted.practiceQuestions,
     loIdByExtractIndex,
     itemIdByExtractIndex,
   );

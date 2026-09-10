@@ -284,3 +284,28 @@ test("an extract with no objectives writes nothing", async () => {
 test("an unknown lecture is refused", async () => {
   await expect(applyExtract(999_999, draft)).rejects.toThrow(/not found/);
 });
+
+test("a stored draft from before emphasis and practice questions existed still applies", async () => {
+  const lectureId = await newLecture();
+  const legacy = {
+    title: "Old draft",
+    learningObjectives: [{ text: "Describe fibrils.", slideRefs: [1] }],
+    concepts: [
+      {
+        label: "Beta-pleated sheet",
+        detail: "Cross-beta.",
+        kind: "fact",
+        provenance: "taught",
+        relatedObjectiveIndexes: [0],
+      },
+    ],
+    commonConfusions: [],
+    conflicts: [],
+  } as unknown as Parameters<typeof applyExtract>[1];
+
+  const result = await applyExtract(lectureId, legacy, "2026-09-09");
+
+  expect(result.reviewItemsCreated).toBe(1);
+  const [item] = await itemsOf(lectureId);
+  expect(item).toMatchObject({ emphasis: "neutral", emphasisCue: "", suspended: false });
+});
