@@ -1,16 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { BADGE, EMPHASIS_BADGE, PROVENANCE_STYLE, QUIZ_BADGE } from "@/app/components/badges";
 import { MARK_LABEL, MARK_STYLE, SUSPENDED_STYLE } from "@/app/components/scores";
 import { SuspendToggle } from "@/app/components/SuspendToggle";
 import { lectureConcepts, type ConceptRow } from "@/lib/concepts";
 
 export const dynamic = "force-dynamic";
-
-function dueLabel(dueIn: number): string {
-  if (dueIn < 0) return `overdue ${-dueIn}d`;
-  if (dueIn === 0) return "due today";
-  return `due in ${dueIn}d`;
-}
 
 export default async function ConceptsPage({
   params,
@@ -44,10 +39,13 @@ export default async function ConceptsPage({
       <h1 className="text-2xl font-semibold tracking-tight">{view.title}</h1>
       <p className="mt-1 text-sm text-stone-500">
         The LO Map: every concept under each objective, numbered, with where
-        it stands and how it was marked on each day it was tested. A concept
-        marked <em>quiz</em> is tested by one of the lecture's own practice
-        questions. Suspend a
-        concept to keep its number but leave it out of every session.
+        it stands and how it was marked on each day it was tested. Suspend a
+        concept to keep its number but leave it out of every session. The
+        lecture&rsquo;s files and the button that reads them are on{" "}
+        <Link href={`/lectures/${view.id}`} className="underline">
+          its own page
+        </Link>
+        .
       </p>
 
       <div className="mt-4 flex flex-wrap gap-4 text-xs text-stone-600 dark:text-stone-400">
@@ -93,9 +91,6 @@ export default async function ConceptsPage({
                     <th className="px-3 py-2 font-medium">Kind</th>
                     <th className="px-3 py-2 font-medium">Tier</th>
                     <th className="px-3 py-2 font-medium">Last</th>
-                    <th className="px-3 py-2 font-medium">Interval</th>
-                    <th className="px-3 py-2 font-medium">Lapses / streak</th>
-                    <th className="px-3 py-2 font-medium">Due</th>
                     {view.dates.map((date) => (
                       <th
                         key={date}
@@ -125,6 +120,8 @@ function suspendedCount(items: ConceptRow[]): number {
 }
 
 function ConceptLine({ item, dates }: { item: ConceptRow; dates: string[] }) {
+  const emphasis = EMPHASIS_BADGE[item.emphasis];
+
   return (
     <tr
       className={`border-t border-stone-200 dark:border-stone-800 ${
@@ -145,14 +142,21 @@ function ConceptLine({ item, dates }: { item: ConceptRow; dates: string[] }) {
           <span>
             {item.concept}
             {item.provenance !== "taught" && (
-              <span className="ml-2 text-xs text-stone-400">{item.provenance}</span>
+              <span className={`ml-2 ${BADGE} ${PROVENANCE_STYLE[item.provenance]}`}>
+                {item.provenance}
+              </span>
+            )}
+            {emphasis && (
+              <span title={item.emphasisCue} className={`ml-2 ${BADGE} ${emphasis.style}`}>
+                {emphasis.label}
+              </span>
             )}
             {item.practiceQuestions.length > 0 && (
               <span
                 title={item.practiceQuestions.join("\n")}
-                className="ml-2 rounded bg-fuchsia-100 px-1 py-0.5 text-[10px] uppercase tracking-wide text-fuchsia-900 dark:bg-fuchsia-950 dark:text-fuchsia-200"
+                className={`ml-2 ${BADGE} ${QUIZ_BADGE.style}`}
               >
-                quiz
+                {QUIZ_BADGE.label}
               </span>
             )}
             {item.suspended && (
@@ -177,16 +181,6 @@ function ConceptLine({ item, dates }: { item: ConceptRow; dates: string[] }) {
         ) : (
           <span className="text-stone-400">—</span>
         )}
-      </td>
-      <td className="px-3 py-2 text-stone-500">{item.intervalDays}d</td>
-      <td className="px-3 py-2 text-stone-500">
-        {item.lapses} / {item.streak}
-      </td>
-      <td className="px-3 py-2 whitespace-nowrap">
-        {item.dueOn}{" "}
-        <span className={item.dueIn < 0 ? "text-red-600 dark:text-red-400" : "text-stone-500"}>
-          ({dueLabel(item.dueIn)})
-        </span>
       </td>
       {dates.map((date) => {
         const mark = item.marks[date];
